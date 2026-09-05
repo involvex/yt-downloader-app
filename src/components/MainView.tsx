@@ -13,6 +13,13 @@ import {
   type Settings,
 } from "../lib/types";
 
+function newId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+}
+
 interface MainViewProps {
   settings: Settings;
   initialUrl?: string;
@@ -27,13 +34,6 @@ interface ActiveDownload {
   raw: string;
 }
 
-function newId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
-}
-
 export default function MainView({ settings, initialUrl, onHistoryChange }: MainViewProps) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [format, setFormat] = useState<MediaFormat>(settings.defaultFormat);
@@ -42,6 +42,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   const [donePath, setDonePath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
   const unlistenRef = useRef<(() => void)[]>([]);
 
   // Note: no prop-syncing effects here. MainView unmounts on tab switch and
@@ -69,6 +70,13 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     clearListeners();
     setError(null);
     setDonePath(null);
+    setUrlError(null);
+
+    if (!/^https?:\/\//i.test(trimmed)) {
+      setUrlError("Enter a valid URL starting with http:// or https://");
+      return;
+    }
+
     setBusy(true);
 
     const id = newId();
@@ -157,15 +165,41 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         <label htmlFor="url" className="mb-1 block text-xs font-medium text-zinc-400">
           Video / Audio URL
         </label>
-        <input
-          id="url"
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.currentTarget.value)}
-          placeholder="https://…"
-          spellCheck={false}
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
-        />
+        <div className="flex gap-2">
+          <input
+            id="url"
+            type="url"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.currentTarget.value);
+              if (urlError) setUrlError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                startDownload();
+              }
+            }}
+            placeholder="https://…"
+            spellCheck={false}
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                setUrl(text);
+                if (urlError) setUrlError(null);
+              } catch {
+                // Clipboard access denied or unavailable.
+              }
+            }}
+            className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
+          >
+            Paste
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
@@ -197,8 +231,12 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
             </option>
           ))}
         </select>
+        {format === "mp3" && (
+          <span className="ml-2 text-[11px] text-zinc-500">Audio uses fixed quality</span>
+        )}
       </div>
 
+      {urlError && <p className="mt-1 text-xs text-red-400">{urlError}</p>}
       <button
         type="button"
         onClick={startDownload}

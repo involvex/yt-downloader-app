@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { saveSettings } from "../lib/store";
 import { QUALITY_OPTIONS, type MediaFormat, type Quality, type Settings } from "../lib/types";
 
@@ -29,6 +30,15 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function openFolder() {
+    if (!outputDir.trim()) return;
+    try {
+      await openPath(outputDir.trim());
+    } catch {
+      // Ignore opener failures.
     }
   }
 
@@ -66,6 +76,13 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
             spellCheck={false}
             className="w-full truncate rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-zinc-500"
           />
+          <button
+            type="button"
+            onClick={openFolder}
+            className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
+          >
+            Open
+          </button>
           <button
             type="button"
             onClick={pickDirectory}
