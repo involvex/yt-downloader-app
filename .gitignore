@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Bundled sidecar binaries (~160 MB) - not committed.
+# Download + rename per src-tauri/binaries/README.md
+src-tauri/binaries/*.exe
+src-tauri/binaries/*.msi
+src-tauri/binaries/*.zip
+
+# Rust build output (in case CARGO_TARGET_DIR is unset)
+src-tauri/target/
+
+# Scratch / local
+.cache/
+D.tmp/
+*.orig

@@ -1,0 +1,3 @@
+# Normalize line endings to LF everywhere (working tree + repo).
+# Prevents CRLF churn between Windows checkouts and prettier (endOfLine: lf).
+* text=auto eol=lf
