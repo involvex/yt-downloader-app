@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Downloader",
+  "productName": "yt-dlp Desktop",
   "version": "0.1.0",
-  "identifier": "com.lukas.downloader-app",
+  "identifier": "com.involvex.downloader",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Downloader",
+        "title": "yt-dlp Desktop",
         "width": 560,
         "height": 720,
         "minWidth": 480,
@@ -38,7 +38,9 @@
     "externalBin": ["binaries/yt-dlp", "binaries/ffmpeg"],
     "windows": {
       "nsis": {
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "publisher": "involvex",
+        "installMode": "perUser"
       }
     }
   }

@@ -63,7 +63,7 @@ downloader-app/                  # canonical project root (create-tauri-app, rea
 │   ├── components/SettingsView.tsx  # dialog picker, quality + default format
 │   └── lib/{store.ts,types.ts}  # store abstraction, shared types
 └── src-tauri/
-    ├── tauri.conf.json          # productName Downloader, 560x720 window, externalBin, NSIS
+    ├── tauri.conf.json          # productName yt-dlp Desktop, 560x720 window, externalBin, NSIS
     ├── capabilities/default.json# least-privilege per-window perms (shell sidecar allow-list)
     ├── build.rs                 # tauri_build::build()
     ├── Cargo.toml               # see release profile below

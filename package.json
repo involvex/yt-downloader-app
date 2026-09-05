@@ -2,6 +2,7 @@
   "name": "downloader-app",
   "private": true,
   "version": "0.1.0",
+  "author": "involvex",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +14,9 @@
     "prebuild": "bun run typecheck && bun run lint && bun run format:check",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:exe": "bun run tauri build --debug && if (-not (Test-Path releases)) { New-Item -ItemType Directory -Path releases | Out-Null } && Copy-Item src-tauri/target/release/downloader-app.exe releases/ -Force",
+    "build:msi": "bun run tauri build --debug && if (-not (Test-Path releases)) { New-Item -ItemType Directory -Path releases | Out-Null } && Copy-Item src-tauri/target/release/bundle/nsis/*.exe releases/ -Force"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

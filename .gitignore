@@ -31,8 +31,10 @@ src-tauri/binaries/*.zip
 
 # Rust build output (in case CARGO_TARGET_DIR is unset)
 src-tauri/target/
+target/
 
 # Scratch / local
 .cache/
 D.tmp/
 *.orig
+releases/
