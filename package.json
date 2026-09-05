@@ -11,12 +11,11 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prebuild": "bun run typecheck && bun run lint && bun run format:check",
+    "prebuild": "bun run typecheck && bun run lint:fix && bun run format",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:exe": "cmd.exe /c \"bun run tauri build --debug && if not exist releases mkdir releases && copy /Y I:\\dev\\cargo-target\\release\\downloader-app.exe releases\\\"",
-    "build:msi": "cmd.exe /c \"bun run tauri build --debug && if not exist releases mkdir releases && copy /Y I:\\dev\\cargo-target\\release\\bundle\\nsis\\*.exe releases\\\""
+    "build:exe": "bunx tauri build && bun scripts/copy-build.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -33,6 +32,8 @@
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@types/node": "26.4.1",
+    "@types/bun": "1.4.1",
     "@vitejs/plugin-react": "^6.0.2",
     "eslint": "^9.28.0",
     "eslint-plugin-react-hooks": "^7.1.1",

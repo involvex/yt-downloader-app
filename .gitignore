@@ -37,3 +37,5 @@ src-tauri/binaries/*.zip
 D.tmp/
 *.orig
 releases/
+.cline/
+.ruff_cache/

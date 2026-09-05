@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "yt-dlp Desktop",
+  "productName": "Downloader App",
   "version": "0.1.0",
-  "identifier": "com.involvex.downloader",
+  "identifier": "com.involvex.downloaderapp",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "yt-dlp Desktop",
+        "title": "Downloader App",
         "width": 560,
         "height": 720,
         "minWidth": 480,
