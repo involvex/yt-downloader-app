@@ -39,8 +39,7 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "publisher": "involvex",
-        "installMode": "perUser"
+        "installMode": "currentUser"
       }
     }
   }

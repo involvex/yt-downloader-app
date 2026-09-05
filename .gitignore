@@ -29,9 +29,8 @@ src-tauri/binaries/*.exe
 src-tauri/binaries/*.msi
 src-tauri/binaries/*.zip
 
-# Rust build output (in case CARGO_TARGET_DIR is unset)
-src-tauri/target/
-target/
+# Rust build output — CARGO_TARGET_DIR is I:\dev\cargo-target (outside repo), nothing to ignore here
+# Keep src-tauri/target/ out of hygiene docs
 
 # Scratch / local
 .cache/

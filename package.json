@@ -15,8 +15,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:exe": "bun run tauri build --debug && if (-not (Test-Path releases)) { New-Item -ItemType Directory -Path releases | Out-Null } && Copy-Item src-tauri/target/release/downloader-app.exe releases/ -Force",
-    "build:msi": "bun run tauri build --debug && if (-not (Test-Path releases)) { New-Item -ItemType Directory -Path releases | Out-Null } && Copy-Item src-tauri/target/release/bundle/nsis/*.exe releases/ -Force"
+    "build:exe": "cmd.exe /c \"bun run tauri build --debug && if not exist releases mkdir releases && copy /Y I:\\dev\\cargo-target\\release\\downloader-app.exe releases\\\"",
+    "build:msi": "cmd.exe /c \"bun run tauri build --debug && if not exist releases mkdir releases && copy /Y I:\\dev\\cargo-target\\release\\bundle\\nsis\\*.exe releases\\\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
