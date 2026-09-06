@@ -1,10 +1,28 @@
-import { mkdir, copyFile } from "node:fs/promises";
+import { mkdir, copyFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { Glob } from "bun";
 
 const targetDir = process.env.CARGO_TARGET_DIR || join("src-tauri", "target");
 const bundleDir = join(targetDir, "release", "bundle");
 const destDir = "releases";
+
+// Produkt-Präfix aus tauri.conf.json lesen (z. B. "Downloader App_0.1.0").
+// CARGO_TARGET_DIR ist maschinenweit geteilt und enthält Bundles fremder
+// Tauri-Projekte — ohne Filter würden alle *.exe/*.msi kopiert.
+const tauriConfRaw = await readFile(join("src-tauri", "tauri.conf.json"), "utf-8");
+const tauriConf = JSON.parse(tauriConfRaw) as {
+  productName?: unknown;
+  version?: unknown;
+};
+const productName = typeof tauriConf.productName === "string" ? tauriConf.productName : "";
+const version = typeof tauriConf.version === "string" ? tauriConf.version : "";
+const bundlePrefix = productName && version ? `${productName}_${version}` : "";
+
+if (!bundlePrefix) {
+  console.warn(
+    `[WARNUNG] productName/version in src-tauri/tauri.conf.json nicht lesbar — Installer-Kopie übersprungen!`
+  );
+}
 
 await mkdir(destDir, { recursive: true });
 
@@ -22,6 +40,12 @@ for (const { dir, pattern } of targets) {
   try {
     for await (const file of glob.scan({ cwd: dir, absolute: true })) {
       const fileName = basename(file);
+
+      if (!bundlePrefix || !fileName.startsWith(bundlePrefix)) {
+        console.log(`[SKIP] Fremdes Bundle ignoriert: ${fileName}`);
+        continue;
+      }
+
       const destPath = join(destDir, fileName);
 
       await copyFile(file, destPath);
@@ -34,7 +58,9 @@ for (const { dir, pattern } of targets) {
 }
 
 if (copiedCount === 0) {
-  console.warn(`[WARNUNG] Keine Installer-Dateien in ${bundleDir} gefunden!`);
+  console.warn(
+    `[WARNUNG] Keine Installer-Dateien mit Präfix "${bundlePrefix}" in ${bundleDir} gefunden!`
+  );
 }
 
 // Standalone Binary kopieren
