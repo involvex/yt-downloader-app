@@ -552,6 +552,26 @@ async fn download_media(
     Err("yt-dlp sidecar ended without a termination signal.".to_string())
 }
 
+/// FEAT-013: delete a downloaded file from disk. User-initiated, path comes
+/// from history (never from arbitrary pasted text). Uses `fs` plugin so it
+/// respects the app's sandbox — no new capability needed beyond what's
+/// already in `default.json`.
+#[tauri::command]
+async fn delete_downloaded_file(_app: AppHandle, path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Path must not be empty.".to_string());
+    }
+    let pb = PathBuf::from(trimmed);
+    if !pb.exists() {
+        return Err("File does not exist.".to_string());
+    }
+    if !pb.is_file() {
+        return Err("Path is not a file.".to_string());
+    }
+    std::fs::remove_file(&pb).map_err(|e| format!("Failed to delete file: {e}"))
+}
+
 /// FEAT-002: cancel a running download. No new capability needed —
 /// `shell:allow-kill` is already in `capabilities/default.json`.
 #[tauri::command]
@@ -687,7 +707,8 @@ pub fn run() {
             download_media,
             cancel_download,
             fetch_metadata,
-            get_sidecar_versions
+            get_sidecar_versions,
+            delete_downloaded_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

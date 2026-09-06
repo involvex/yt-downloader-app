@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { clearHistory, removeHistoryItem } from "../lib/store";
 import type { DownloadItem, DownloadStatus } from "../lib/types";
@@ -53,6 +54,46 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
     }
   }
 
+  async function handleDeleteFile(path: string) {
+    if (!confirm("Delete this file from disk? This cannot be undone.")) return;
+    try {
+      await invoke("delete_downloaded_file", { path });
+      await handleRemove(
+        items.find((i) => i.path === path)?.id ?? items.find((i) => i.path === path)?.id ?? ""
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleExportJson() {
+    const data = JSON.stringify(filtered, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `history-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleExportCsv() {
+    const header = "id,title,url,format,quality,status,percent,speed,eta,path,error,createdAt\n";
+    const rows = filtered
+      .map(
+        (item) =>
+          `"${(item.title ?? "").replace(/"/g, '""')}","${item.url.replace(/"/g, '""')}",${item.format},${item.quality},${item.status},${item.percent},"${(item.speed ?? "").replace(/"/g, '""')}","${(item.eta ?? "").replace(/"/g, '""')}","${(item.path ?? "").replace(/"/g, '""')}","${(item.error ?? "").replace(/"/g, '""')}",${item.createdAt}`
+      )
+      .join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (items.length === 0) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-center">
@@ -88,6 +129,24 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          disabled={filtered.length === 0}
+          title="Export filtered history as CSV"
+          className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          CSV
+        </button>
+        <button
+          type="button"
+          onClick={handleExportJson}
+          disabled={filtered.length === 0}
+          title="Export filtered history as JSON"
+          className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          JSON
+        </button>
         <button
           type="button"
           onClick={handleClear}
@@ -157,6 +216,15 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
                 className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
               >
                 Show in folder
+              </button>
+            )}
+            {item.path && item.status === "done" && (
+              <button
+                type="button"
+                onClick={() => void handleDeleteFile(item.path!)}
+                className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 hover:border-red-500 hover:text-red-300"
+              >
+                Delete file
               </button>
             )}
             <button
