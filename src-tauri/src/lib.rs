@@ -240,7 +240,7 @@ fn build_subtitle_args(format: &str, langs: Option<&str>, embed: bool) -> Vec<St
     let Some(langs) = langs else {
         return Vec::new();
     };
-    if format == "mp3" {
+    if format != "mp4" {
         return Vec::new();
     }
     let mut args = vec![
@@ -257,12 +257,33 @@ fn build_subtitle_args(format: &str, langs: Option<&str>, embed: bool) -> Vec<St
     args
 }
 
+/// FEAT-009: audio codec allow-list. The codec lands verbatim in
+/// `--audio-format`, so anything off-list is rejected (see `validate_format`).
+const AUDIO_CODECS: [&str; 5] = ["mp3", "m4a", "opus", "flac", "wav"];
+
+fn validate_format(raw: &str) -> Result<String, String> {
+    let f = raw.trim().to_lowercase();
+    if f == "mp4" || AUDIO_CODECS.contains(&f.as_str()) {
+        Ok(f)
+    } else {
+        Err("Unsupported format.".to_string())
+    }
+}
+
 fn build_format_args(format: &str, quality: &str) -> Vec<String> {
-    if format == "mp3" {
+    if format != "mp4" {
+        // Validated by `validate_format`; fall back to mp3 defensively.
+        let codec = if AUDIO_CODECS.contains(&format) {
+            format
+        } else {
+            "mp3"
+        };
         return vec![
             "-x".to_string(),
             "--audio-format".to_string(),
-            "mp3".to_string(),
+            codec.to_string(),
+            "--audio-quality".to_string(),
+            "0".to_string(),
         ];
     }
 
@@ -273,6 +294,7 @@ fn build_format_args(format: &str, quality: &str) -> Vec<String> {
         "720p" => "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
         "480p" => "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
         "360p" => "bestvideo[height<=360]+bestaudio/best[height<=360]/best",
+        "240p" => "bestvideo[height<=240]+bestaudio/best[height<=240]/best",
         _ => "bestvideo+bestaudio/best",
     };
 
@@ -304,6 +326,7 @@ async fn download_media(
     let output_dir = validate_output_dir(&output_dir)?;
     let template = validate_template(filename_template)?;
     let subtitle_langs = validate_subtitle_langs(subtitle_langs)?;
+    let format = validate_format(&format)?;
 
     let ffmpeg_dir = resolve_ffmpeg_dir(&app)?;
     let ffmpeg_location = ffmpeg_dir.to_string_lossy().to_string();
@@ -618,11 +641,31 @@ mod tests {
             ("720p", "height<=720"),
             ("480p", "height<=480"),
             ("360p", "height<=360"),
+            ("240p", "height<=240"),
         ] {
             let args = build_format_args("mp4", q);
             assert!(args.join(" ").contains(needle), "quality {q}");
         }
-        assert!(build_format_args("mp3", "best").contains(&"-x".to_string()));
+        for codec in ["mp3", "m4a", "opus", "flac", "wav"] {
+            let args = build_format_args(codec, "best");
+            let joined = args.join(" ");
+            assert!(joined.contains("-x"), "codec {codec}");
+            assert!(
+                joined.contains(&format!("--audio-format {codec}")),
+                "codec {codec}"
+            );
+            assert!(joined.contains("--audio-quality 0"), "codec {codec}");
+        }
+    }
+
+    #[test]
+    fn format_validation_allows_only_known() {
+        assert_eq!(validate_format("mp4").unwrap(), "mp4");
+        assert_eq!(validate_format("MP3").unwrap(), "mp3");
+        assert_eq!(validate_format("opus").unwrap(), "opus");
+        assert!(validate_format("").is_err());
+        assert!(validate_format("avi").is_err());
+        assert!(validate_format("mp3; rm -rf").is_err());
     }
 
     #[test]
