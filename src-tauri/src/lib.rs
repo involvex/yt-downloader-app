@@ -257,6 +257,63 @@ fn build_subtitle_args(format: &str, langs: Option<&str>, embed: bool) -> Vec<St
     args
 }
 
+/// FEAT-010: SponsorBlock categories yt-dlp understands. Values land verbatim
+/// in `--sponsorblock-remove`, so only allow-listed names pass validation.
+const SPONSOR_CATEGORIES: [&str; 9] = [
+    "sponsor",
+    "intro",
+    "outro",
+    "selfpromo",
+    "preview",
+    "filler",
+    "interaction",
+    "music_offtopic",
+    "all",
+];
+
+/// FEAT-010: validate `--sponsorblock-remove` (comma-separated categories).
+/// Empty/None disables SponsorBlock.
+fn validate_sponsorblock(raw: Option<String>) -> Result<Option<String>, String> {
+    let cats = raw
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+    let Some(cats) = cats else {
+        return Ok(None);
+    };
+    if cats.len() > 64 {
+        return Err("SponsorBlock categories are too long.".to_string());
+    }
+    let ok = cats
+        .split(',')
+        .filter(|p| !p.is_empty())
+        .all(|p| SPONSOR_CATEGORIES.contains(&p));
+    if !ok {
+        return Err("Unknown SponsorBlock category.".to_string());
+    }
+    Ok(Some(cats))
+}
+
+/// FEAT-010: SponsorBlock removal plus chapter handling. Applies to video and
+/// audio (podcasts benefit most from `--split-chapters`).
+fn build_sponsorblock_args(
+    categories: Option<&str>,
+    split_chapters: bool,
+    embed_chapters: bool,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(cats) = categories {
+        args.push("--sponsorblock-remove".to_string());
+        args.push(cats.to_string());
+    }
+    if split_chapters {
+        args.push("--split-chapters".to_string());
+    }
+    if embed_chapters {
+        args.push("--embed-chapters".to_string());
+    }
+    args
+}
+
 /// FEAT-009: audio codec allow-list. The codec lands verbatim in
 /// `--audio-format`, so anything off-list is rejected (see `validate_format`).
 const AUDIO_CODECS: [&str; 5] = ["mp3", "m4a", "opus", "flac", "wav"];
@@ -318,6 +375,9 @@ async fn download_media(
     filename_template: Option<String>,
     subtitle_langs: Option<String>,
     embed_subs: Option<bool>,
+    sponsorblock_remove: Option<String>,
+    split_chapters: Option<bool>,
+    embed_chapters: Option<bool>,
 ) -> Result<String, String> {
     if id.trim().is_empty() || id.len() > 64 {
         return Err("Invalid download id.".to_string());
@@ -327,6 +387,7 @@ async fn download_media(
     let template = validate_template(filename_template)?;
     let subtitle_langs = validate_subtitle_langs(subtitle_langs)?;
     let format = validate_format(&format)?;
+    let sponsorblock = validate_sponsorblock(sponsorblock_remove)?;
 
     let ffmpeg_dir = resolve_ffmpeg_dir(&app)?;
     let ffmpeg_location = ffmpeg_dir.to_string_lossy().to_string();
@@ -338,6 +399,11 @@ async fn download_media(
         &format,
         subtitle_langs.as_deref(),
         embed_subs.unwrap_or(true),
+    ));
+    args.extend(build_sponsorblock_args(
+        sponsorblock.as_deref(),
+        split_chapters.unwrap_or(false),
+        embed_chapters.unwrap_or(false),
     ));
     args.push("--newline".to_string());
     args.push("--progress".to_string());
@@ -656,6 +722,32 @@ mod tests {
             );
             assert!(joined.contains("--audio-quality 0"), "codec {codec}");
         }
+    }
+
+    #[test]
+    fn sponsorblock_validation_and_args() {
+        assert_eq!(validate_sponsorblock(None).unwrap(), None);
+        assert_eq!(validate_sponsorblock(Some("".into())).unwrap(), None);
+        assert_eq!(
+            validate_sponsorblock(Some("sponsor,selfpromo".into())).unwrap(),
+            Some("sponsor,selfpromo".to_string())
+        );
+        assert_eq!(
+            validate_sponsorblock(Some("Sponsor".into())).unwrap(),
+            Some("sponsor".to_string())
+        );
+        assert!(validate_sponsorblock(Some("--remove".into())).is_err());
+        assert!(validate_sponsorblock(Some("sponsor,evil".into())).is_err());
+
+        assert!(build_sponsorblock_args(None, false, false).is_empty());
+        let args = build_sponsorblock_args(Some("sponsor"), true, true);
+        let joined = args.join(" ");
+        assert!(joined.contains("--sponsorblock-remove sponsor"));
+        assert!(joined.contains("--split-chapters"));
+        assert!(joined.contains("--embed-chapters"));
+        assert!(!build_sponsorblock_args(None, true, false)
+            .join(" ")
+            .contains("--sponsorblock-remove"));
     }
 
     #[test]
