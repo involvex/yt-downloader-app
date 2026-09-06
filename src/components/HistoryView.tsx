@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { clearHistory, removeHistoryItem } from "../lib/store";
 import type { DownloadItem, DownloadStatus } from "../lib/types";
@@ -19,7 +20,21 @@ function formatDate(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
+type StatusFilter = "all" | DownloadStatus;
+
 export default function HistoryView({ items, onHistoryChange, onRetry }: HistoryViewProps) {
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
+
+  const q = query.trim().toLowerCase();
+  const filtered = items.filter((item) => {
+    if (status !== "all" && item.status !== status) return false;
+    if (!q) return true;
+    return [item.title ?? "", item.url, item.path ?? "", item.error ?? ""].some((f) =>
+      f.toLowerCase().includes(q)
+    );
+  });
+
   async function handleRemove(id: string) {
     onHistoryChange(await removeHistoryItem(id));
   }
@@ -51,17 +66,42 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-zinc-500">{items.length} item(s)</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="shrink-0 text-xs text-zinc-500">{filtered.length} item(s)</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.currentTarget.value)}
+          placeholder="Search URL, title, path…"
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+        />
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.currentTarget.value as StatusFilter)}
+          title="Filter by status"
+          className="shrink-0 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+        >
+          {(["all", "queued", "downloading", "done", "error"] as StatusFilter[]).map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
         <button
           type="button"
           onClick={handleClear}
-          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+          className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
         >
           Clear all
         </button>
       </div>
-      {items.map((item) => (
+      {filtered.length === 0 && (
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-center text-xs text-zinc-500">
+          No items match the current search / filter.
+        </p>
+      )}
+      {filtered.map((item) => (
         <div key={item.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
           <div className="flex items-center gap-2">
             <span
@@ -79,7 +119,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
           <p className="mt-2 truncate text-xs text-zinc-200" title={item.url}>
             {item.title ?? item.url}
           </p>
-          {item.status === "downloading" && (
+          {(item.status === "downloading" || item.status === "queued") && (
             <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
               <div
                 className="h-full rounded-full bg-sky-400"

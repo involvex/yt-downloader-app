@@ -1,6 +1,6 @@
 import { Store } from "@tauri-apps/plugin-store";
 import { downloadDir } from "@tauri-apps/api/path";
-import type { DownloadItem, Settings } from "./types";
+import { DEFAULT_FILENAME_TEMPLATE, type DownloadItem, type Settings } from "./types";
 
 const SETTINGS_FILE = "settings.json";
 const HISTORY_FILE = "history.json";
@@ -30,7 +30,11 @@ export async function loadSettings(): Promise<Settings> {
   const quality = (await store.get<Settings["quality"]>("quality").catch(() => null)) || "best";
   const defaultFormat =
     (await store.get<Settings["defaultFormat"]>("defaultFormat").catch(() => null)) || "mp4";
-  return { outputDir, quality, defaultFormat };
+  const filenameTemplate =
+    (await store.get<string>("filenameTemplate").catch(() => null)) || DEFAULT_FILENAME_TEMPLATE;
+  const playlist =
+    (await store.get<Settings["playlist"]>("playlist").catch(() => null)) || "single";
+  return { outputDir, quality, defaultFormat, filenameTemplate, playlist };
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
@@ -38,6 +42,8 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await store.set("outputDir", settings.outputDir);
   await store.set("quality", settings.quality);
   await store.set("defaultFormat", settings.defaultFormat);
+  await store.set("filenameTemplate", settings.filenameTemplate);
+  await store.set("playlist", settings.playlist);
   await store.save();
 }
 
