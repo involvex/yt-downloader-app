@@ -34,7 +34,17 @@ export async function loadSettings(): Promise<Settings> {
     (await store.get<string>("filenameTemplate").catch(() => null)) || DEFAULT_FILENAME_TEMPLATE;
   const playlist =
     (await store.get<Settings["playlist"]>("playlist").catch(() => null)) || "single";
-  return { outputDir, quality, defaultFormat, filenameTemplate, playlist };
+  const subtitleLangs = (await store.get<string>("subtitleLangs").catch(() => null)) || "";
+  const embedSubs = (await store.get<boolean>("embedSubs").catch(() => null)) ?? true;
+  return {
+    outputDir,
+    quality,
+    defaultFormat,
+    filenameTemplate,
+    playlist,
+    subtitleLangs,
+    embedSubs,
+  };
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
@@ -44,6 +54,8 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await store.set("defaultFormat", settings.defaultFormat);
   await store.set("filenameTemplate", settings.filenameTemplate);
   await store.set("playlist", settings.playlist);
+  await store.set("subtitleLangs", settings.subtitleLangs);
+  await store.set("embedSubs", settings.embedSubs);
   await store.save();
 }
 

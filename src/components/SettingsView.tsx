@@ -24,6 +24,8 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
   const [defaultFormat, setDefaultFormat] = useState<MediaFormat>(settings.defaultFormat);
   const [filenameTemplate, setFilenameTemplate] = useState(settings.filenameTemplate);
   const [playlist, setPlaylist] = useState<PlaylistMode>(settings.playlist);
+  const [subtitleLangs, setSubtitleLangs] = useState(settings.subtitleLangs);
+  const [embedSubs, setEmbedSubs] = useState(settings.embedSubs);
   const [versions, setVersions] = useState<SidecarVersions | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +81,15 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       setError("Filename template must be a bare filename (no paths, '..' or ':').");
       return;
     }
+    const langs = subtitleLangs.trim();
+    if (
+      langs !== "" &&
+      langs !== "all" &&
+      !/^[A-Za-z][A-Za-z_-]{0,11}(,[A-Za-z][A-Za-z_-]{0,11})*$/.test(langs)
+    ) {
+      setError('Subtitle languages must be comma-separated codes like "en,de".');
+      return;
+    }
     setError(null);
     const next: Settings = {
       outputDir: outputDir.trim(),
@@ -86,6 +97,8 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       defaultFormat,
       filenameTemplate: template,
       playlist,
+      subtitleLangs: langs,
+      embedSubs,
     };
     await saveSettings(next);
     onSave(next);
@@ -211,6 +224,37 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <label htmlFor="subLangs" className="mb-1 block text-xs font-medium text-zinc-400">
+          Default subtitles (video only)
+        </label>
+        <input
+          id="subLangs"
+          type="text"
+          value={subtitleLangs}
+          onChange={(e) => {
+            setSubtitleLangs(e.currentTarget.value);
+            setSaved(false);
+          }}
+          spellCheck={false}
+          placeholder="en,de — empty = off"
+          className="w-full truncate rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-zinc-500"
+        />
+        <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={embedSubs}
+            onChange={(e) => {
+              setEmbedSubs(e.currentTarget.checked);
+              setSaved(false);
+            }}
+            disabled={subtitleLangs.trim() === ""}
+            className="accent-zinc-100"
+          />
+          Embed subtitles in video file
+        </label>
       </div>
 
       <button

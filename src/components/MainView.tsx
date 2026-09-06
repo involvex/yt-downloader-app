@@ -58,6 +58,8 @@ interface QueuedJob {
   format: MediaFormat;
   quality: Quality;
   playlist: PlaylistMode;
+  subtitleLangs: string;
+  embedSubs: boolean;
 }
 
 function MetaCard({ meta }: { meta: VideoMetadata }) {
@@ -88,6 +90,8 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   const [format, setFormat] = useState<MediaFormat>(settings.defaultFormat);
   const [quality, setQuality] = useState<Quality>(settings.quality);
   const [playlist, setPlaylist] = useState<PlaylistMode>(settings.playlist);
+  const [subtitleLangs, setSubtitleLangs] = useState(settings.subtitleLangs);
+  const [embedSubs, setEmbedSubs] = useState(settings.embedSubs);
   const [active, setActive] = useState<Record<string, ActiveDownload>>({});
   const [meta, setMeta] = useState<VideoMetadata | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
@@ -240,6 +244,8 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         outputDir: s.outputDir,
         playlist: job.playlist,
         filenameTemplate: s.filenameTemplate,
+        subtitleLangs: job.subtitleLangs,
+        embedSubs: job.embedSubs,
       });
       setActive((prev) => {
         const cur = prev[job.id];
@@ -321,7 +327,15 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         status: runningRef.current < MAX_CONCURRENT ? "downloading" : "queued",
       },
     }));
-    queueRef.current.push({ id, url: trimmed, format, quality, playlist });
+    queueRef.current.push({
+      id,
+      url: trimmed,
+      format,
+      quality,
+      playlist,
+      subtitleLangs: format === "mp4" ? subtitleLangs.trim() : "",
+      embedSubs,
+    });
     setUrl("");
     setMeta(null);
     pump();
@@ -481,6 +495,33 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
           ))}
         </select>
       </div>
+
+      {format === "mp4" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="subs" className="text-xs font-medium text-zinc-400">
+            Subtitles
+          </label>
+          <input
+            id="subs"
+            type="text"
+            value={subtitleLangs}
+            onChange={(e) => setSubtitleLangs(e.currentTarget.value)}
+            placeholder="en,de — empty = off"
+            spellCheck={false}
+            className="w-44 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+          />
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={embedSubs}
+              onChange={(e) => setEmbedSubs(e.currentTarget.checked)}
+              disabled={subtitleLangs.trim() === ""}
+              className="accent-zinc-100"
+            />
+            Embed in video
+          </label>
+        </div>
+      )}
 
       {urlError && <p className="text-xs text-red-400">{urlError}</p>}
       <div className="flex gap-2">

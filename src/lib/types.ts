@@ -12,6 +12,8 @@ export interface Settings {
   defaultFormat: MediaFormat;
   filenameTemplate: string;
   playlist: PlaylistMode;
+  subtitleLangs: string;
+  embedSubs: boolean;
 }
 
 export const DEFAULT_FILENAME_TEMPLATE = "%(title)s [%(id)s].%(ext)s";
