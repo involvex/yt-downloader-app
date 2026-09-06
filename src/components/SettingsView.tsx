@@ -27,6 +27,9 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
   const [playlist, setPlaylist] = useState<PlaylistMode>(settings.playlist);
   const [subtitleLangs, setSubtitleLangs] = useState(settings.subtitleLangs);
   const [embedSubs, setEmbedSubs] = useState(settings.embedSubs);
+  const [sponsorblockRemove, setSponsorblockRemove] = useState(settings.sponsorblockRemove);
+  const [splitChapters, setSplitChapters] = useState(settings.splitChapters);
+  const [embedChapters, setEmbedChapters] = useState(settings.embedChapters);
   const [versions, setVersions] = useState<SidecarVersions | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +94,16 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       setError('Subtitle languages must be comma-separated codes like "en,de".');
       return;
     }
+    const sb = sponsorblockRemove.trim();
+    if (
+      sb !== "" &&
+      !/^(sponsor|intro|outro|preview|filler|interaction|music_offtopic|all)(,(sponsor|intro|outro|preview|filler|interaction|music_offtopic|all))*$/.test(
+        sb
+      )
+    ) {
+      setError("Unknown SponsorBlock category.");
+      return;
+    }
     setError(null);
     const next: Settings = {
       outputDir: outputDir.trim(),
@@ -100,6 +113,9 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       playlist,
       subtitleLangs: langs,
       embedSubs,
+      sponsorblockRemove: sb,
+      splitChapters,
+      embedChapters,
     };
     await saveSettings(next);
     onSave(next);
@@ -254,6 +270,50 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
           />
           Embed subtitles in video file
         </label>
+      </div>
+
+      <div>
+        <label htmlFor="sb" className="mb-1 block text-xs font-medium text-zinc-400">
+          SponsorBlock categories (video only)
+        </label>
+        <input
+          id="sb"
+          type="text"
+          value={sponsorblockRemove}
+          onChange={(e) => {
+            setSponsorblockRemove(e.currentTarget.value);
+            setSaved(false);
+          }}
+          placeholder="sponsor,selfpromo — empty = off"
+          spellCheck={false}
+          className="w-full truncate rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-zinc-500"
+        />
+        <div className="mt-2 flex flex-wrap gap-3">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={splitChapters}
+              onChange={(e) => {
+                setSplitChapters(e.currentTarget.checked);
+                setSaved(false);
+              }}
+              className="accent-zinc-100"
+            />
+            Split chapters
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={embedChapters}
+              onChange={(e) => {
+                setEmbedChapters(e.currentTarget.checked);
+                setSaved(false);
+              }}
+              className="accent-zinc-100"
+            />
+            Embed chapters
+          </label>
+        </div>
       </div>
 
       <button

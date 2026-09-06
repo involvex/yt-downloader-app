@@ -62,6 +62,9 @@ interface QueuedJob {
   playlist: PlaylistMode;
   subtitleLangs: string;
   embedSubs: boolean;
+  sponsorblockRemove: string;
+  splitChapters: boolean;
+  embedChapters: boolean;
 }
 
 function MetaCard({ meta }: { meta: VideoMetadata }) {
@@ -94,6 +97,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   const [playlist, setPlaylist] = useState<PlaylistMode>(settings.playlist);
   const [subtitleLangs, setSubtitleLangs] = useState(settings.subtitleLangs);
   const [embedSubs, setEmbedSubs] = useState(settings.embedSubs);
+  const [sponsorblockRemove, setSponsorblockRemove] = useState(settings.sponsorblockRemove);
+  const [splitChapters, setSplitChapters] = useState(settings.splitChapters);
+  const [embedChapters, setEmbedChapters] = useState(settings.embedChapters);
   const [active, setActive] = useState<Record<string, ActiveDownload>>({});
   const [meta, setMeta] = useState<VideoMetadata | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
@@ -248,6 +254,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         filenameTemplate: s.filenameTemplate,
         subtitleLangs: job.subtitleLangs,
         embedSubs: job.embedSubs,
+        sponsorblockRemove: job.sponsorblockRemove,
+        splitChapters: job.splitChapters,
+        embedChapters: job.embedChapters,
       });
       setActive((prev) => {
         const cur = prev[job.id];
@@ -337,6 +346,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       playlist,
       subtitleLangs: isVideoFormat(format) ? subtitleLangs.trim() : "",
       embedSubs,
+      sponsorblockRemove: sponsorblockRemove.trim(),
+      splitChapters,
+      embedChapters,
     });
     setUrl("");
     setMeta(null);
@@ -522,6 +534,41 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
               className="accent-zinc-100"
             />
             Embed in video
+          </label>
+        </div>
+      )}
+
+      {isVideoFormat(format) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="sb" className="text-xs font-medium text-zinc-400">
+            SponsorBlock
+          </label>
+          <input
+            id="sb"
+            type="text"
+            value={sponsorblockRemove}
+            onChange={(e) => setSponsorblockRemove(e.currentTarget.value)}
+            placeholder="sponsor,selfpromo — empty = off"
+            spellCheck={false}
+            className="w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+          />
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={splitChapters}
+              onChange={(e) => setSplitChapters(e.currentTarget.checked)}
+              className="accent-zinc-100"
+            />
+            Split chapters
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={embedChapters}
+              onChange={(e) => setEmbedChapters(e.currentTarget.checked)}
+              className="accent-zinc-100"
+            />
+            Embed chapters
           </label>
         </div>
       )}

@@ -36,6 +36,10 @@ export async function loadSettings(): Promise<Settings> {
     (await store.get<Settings["playlist"]>("playlist").catch(() => null)) || "single";
   const subtitleLangs = (await store.get<string>("subtitleLangs").catch(() => null)) || "";
   const embedSubs = (await store.get<boolean>("embedSubs").catch(() => null)) ?? true;
+  const sponsorblockRemove =
+    (await store.get<string>("sponsorblockRemove").catch(() => null)) || "";
+  const splitChapters = (await store.get<boolean>("splitChapters").catch(() => null)) ?? false;
+  const embedChapters = (await store.get<boolean>("embedChapters").catch(() => null)) ?? false;
   return {
     outputDir,
     quality,
@@ -44,6 +48,9 @@ export async function loadSettings(): Promise<Settings> {
     playlist,
     subtitleLangs,
     embedSubs,
+    sponsorblockRemove,
+    splitChapters,
+    embedChapters,
   };
 }
 
@@ -56,6 +63,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await store.set("playlist", settings.playlist);
   await store.set("subtitleLangs", settings.subtitleLangs);
   await store.set("embedSubs", settings.embedSubs);
+  await store.set("sponsorblockRemove", settings.sponsorblockRemove);
+  await store.set("splitChapters", settings.splitChapters);
+  await store.set("embedChapters", settings.embedChapters);
   await store.save();
 }
 

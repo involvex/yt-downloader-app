@@ -18,7 +18,22 @@ export interface Settings {
   playlist: PlaylistMode;
   subtitleLangs: string;
   embedSubs: boolean;
+  sponsorblockRemove: string;
+  splitChapters: boolean;
+  embedChapters: boolean;
 }
+
+export const SPONSORBLOCK_CATEGORIES = [
+  "sponsor",
+  "intro",
+  "outro",
+  "selfpromo",
+  "preview",
+  "filler",
+  "interaction",
+  "music_offtopic",
+  "all",
+] as const;
 
 export const DEFAULT_FILENAME_TEMPLATE = "%(title)s [%(id)s].%(ext)s";
 
