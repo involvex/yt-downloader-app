@@ -1,6 +1,10 @@
-export type MediaFormat = "mp4" | "mp3";
+export type MediaFormat = "mp4" | "mp3" | "m4a" | "opus" | "flac" | "wav";
 
-export type Quality = "best" | "2160p" | "1440p" | "1080p" | "720p" | "480p" | "360p";
+export type Quality = "best" | "2160p" | "1440p" | "1080p" | "720p" | "480p" | "360p" | "240p";
+
+export function isVideoFormat(format: MediaFormat): boolean {
+  return format === "mp4";
+}
 
 export type DownloadStatus = "queued" | "downloading" | "done" | "error";
 
@@ -74,6 +78,16 @@ export const QUALITY_OPTIONS: { value: Quality; label: string }[] = [
   { value: "720p", label: "720p" },
   { value: "480p", label: "480p" },
   { value: "360p", label: "360p" },
+  { value: "240p", label: "240p" },
+];
+
+export const FORMAT_OPTIONS: { value: MediaFormat; label: string }[] = [
+  { value: "mp4", label: "Video (MP4)" },
+  { value: "mp3", label: "Audio (MP3)" },
+  { value: "m4a", label: "Audio (M4A)" },
+  { value: "opus", label: "Audio (Opus)" },
+  { value: "flac", label: "Audio (FLAC)" },
+  { value: "wav", label: "Audio (WAV)" },
 ];
 
 export const PLAYLIST_OPTIONS: { value: PlaylistMode; label: string }[] = [

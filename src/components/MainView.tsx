@@ -3,9 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { upsertHistoryItem } from "../lib/store";
 import {
+  FORMAT_OPTIONS,
   PLAYLIST_OPTIONS,
   QUALITY_OPTIONS,
   formatDuration,
+  isVideoFormat,
   type CompleteEventPayload,
   type DownloadItem,
   type ErrorEventPayload,
@@ -333,7 +335,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       format,
       quality,
       playlist,
-      subtitleLangs: format === "mp4" ? subtitleLangs.trim() : "",
+      subtitleLangs: isVideoFormat(format) ? subtitleLangs.trim() : "",
       embedSubs,
     });
     setUrl("");
@@ -454,25 +456,26 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-zinc-400">Format</span>
-        <div className="flex rounded-lg border border-zinc-700 bg-zinc-900 p-0.5">
-          {(["mp4", "mp3"] as MediaFormat[]).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setFormat(f)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                format === f ? "bg-zinc-100 text-zinc-900" : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              {f === "mp4" ? "Video (MP4)" : "Audio (MP3)"}
-            </button>
+        <label htmlFor="format" className="text-xs font-medium text-zinc-400">
+          Format
+        </label>
+        <select
+          id="format"
+          value={format}
+          onChange={(e) => setFormat(e.currentTarget.value as MediaFormat)}
+          title="Download format"
+          className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
+        >
+          {FORMAT_OPTIONS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
           ))}
-        </div>
+        </select>
         <select
           value={quality}
           onChange={(e) => setQuality(e.currentTarget.value as Quality)}
-          disabled={format === "mp3"}
+          disabled={!isVideoFormat(format)}
           title="Download quality"
           className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none disabled:opacity-40"
         >
@@ -496,7 +499,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         </select>
       </div>
 
-      {format === "mp4" && (
+      {isVideoFormat(format) && (
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="subs" className="text-xs font-medium text-zinc-400">
             Subtitles

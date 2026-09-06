@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { saveSettings } from "../lib/store";
 import {
+  FORMAT_OPTIONS,
   PLAYLIST_OPTIONS,
   QUALITY_OPTIONS,
   type MediaFormat,
@@ -183,26 +184,24 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       </div>
 
       <div>
-        <span className="mb-1 block text-xs font-medium text-zinc-400">Default format</span>
-        <div className="flex rounded-lg border border-zinc-700 bg-zinc-900 p-0.5">
-          {(["mp4", "mp3"] as MediaFormat[]).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => {
-                setDefaultFormat(f);
-                setSaved(false);
-              }}
-              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                defaultFormat === f
-                  ? "bg-zinc-100 text-zinc-900"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              {f === "mp4" ? "Video (MP4)" : "Audio (MP3)"}
-            </button>
+        <label htmlFor="defaultFormat" className="mb-1 block text-xs font-medium text-zinc-400">
+          Default format
+        </label>
+        <select
+          id="defaultFormat"
+          value={defaultFormat}
+          onChange={(e) => {
+            setDefaultFormat(e.currentTarget.value as MediaFormat);
+            setSaved(false);
+          }}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+        >
+          {FORMAT_OPTIONS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
           ))}
-        </div>
+        </select>
       </div>
 
       <div>
