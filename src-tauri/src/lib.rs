@@ -205,6 +205,58 @@ fn resolve_ffmpeg_dir(app: &AppHandle) -> Result<PathBuf, String> {
     ))
 }
 
+/// FEAT-008: validate `--sub-langs` (comma-separated codes or `all`).
+/// Empty/None disables subtitles. Rejects anything yt-dlp would interpret as
+/// a flag or path — charset is limited to language-code characters.
+fn validate_subtitle_langs(raw: Option<String>) -> Result<Option<String>, String> {
+    let langs = raw.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let Some(langs) = langs else {
+        return Ok(None);
+    };
+    if langs.len() > 64 {
+        return Err("Subtitle languages are too long (max 64 characters).".to_string());
+    }
+    if langs == "all" {
+        return Ok(Some(langs));
+    }
+    let ok = langs.split(',').filter(|p| !p.is_empty()).all(|p| {
+        let p = p.strip_suffix(".*").unwrap_or(p);
+        // Leading `-` would turn the value into a flag — reject it.
+        !p.is_empty()
+            && !p.starts_with('-')
+            && p.len() <= 12
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    });
+    if !ok {
+        return Err("Subtitle languages must be comma-separated codes like \"en,de\".".to_string());
+    }
+    Ok(Some(langs))
+}
+
+/// FEAT-008: subtitle args for video downloads. Audio (`-x`) extraction drops
+/// subtitles — keep them video-only so failures can't break MP3 downloads.
+fn build_subtitle_args(format: &str, langs: Option<&str>, embed: bool) -> Vec<String> {
+    let Some(langs) = langs else {
+        return Vec::new();
+    };
+    if format == "mp3" {
+        return Vec::new();
+    }
+    let mut args = vec![
+        "--write-subs".to_string(),
+        "--write-auto-subs".to_string(),
+        "--sub-langs".to_string(),
+        langs.to_string(),
+        "--convert-subs".to_string(),
+        "srt".to_string(),
+    ];
+    if embed {
+        args.push("--embed-subs".to_string());
+    }
+    args
+}
+
 fn build_format_args(format: &str, quality: &str) -> Vec<String> {
     if format == "mp3" {
         return vec![
@@ -242,6 +294,8 @@ async fn download_media(
     output_dir: String,
     playlist: Option<String>,
     filename_template: Option<String>,
+    subtitle_langs: Option<String>,
+    embed_subs: Option<bool>,
 ) -> Result<String, String> {
     if id.trim().is_empty() || id.len() > 64 {
         return Err("Invalid download id.".to_string());
@@ -249,6 +303,7 @@ async fn download_media(
     let url = validate_url(&url)?;
     let output_dir = validate_output_dir(&output_dir)?;
     let template = validate_template(filename_template)?;
+    let subtitle_langs = validate_subtitle_langs(subtitle_langs)?;
 
     let ffmpeg_dir = resolve_ffmpeg_dir(&app)?;
     let ffmpeg_location = ffmpeg_dir.to_string_lossy().to_string();
@@ -256,6 +311,11 @@ async fn download_media(
     let output_template = format!("{output_dir}/{template}");
 
     let mut args = build_format_args(&format, &quality);
+    args.extend(build_subtitle_args(
+        &format,
+        subtitle_langs.as_deref(),
+        embed_subs.unwrap_or(true),
+    ));
     args.push("--newline".to_string());
     args.push("--progress".to_string());
     // FEAT-012 (quick win): resume partial files + retry transient failures.
@@ -581,6 +641,38 @@ mod tests {
         assert!(validate_output_dir("../evil").is_err());
         assert!(validate_output_dir("a/../../b").is_err());
         assert!(validate_output_dir("some/dir").is_ok());
+    }
+
+    #[test]
+    fn subtitle_langs_validation() {
+        assert_eq!(validate_subtitle_langs(None).unwrap(), None);
+        assert_eq!(validate_subtitle_langs(Some("".into())).unwrap(), None);
+        assert_eq!(
+            validate_subtitle_langs(Some("en,de".into())).unwrap(),
+            Some("en,de".to_string())
+        );
+        assert_eq!(
+            validate_subtitle_langs(Some("all".into())).unwrap(),
+            Some("all".to_string())
+        );
+        assert!(validate_subtitle_langs(Some("--write-subs".into())).is_err());
+        assert!(validate_subtitle_langs(Some("../x".into())).is_err());
+        assert!(validate_subtitle_langs(Some("en; rm".into())).is_err());
+    }
+
+    #[test]
+    fn subtitle_args_video_only() {
+        assert!(build_subtitle_args("mp4", None, true).is_empty());
+        assert!(build_subtitle_args("mp3", Some("en"), true).is_empty());
+        let args = build_subtitle_args("mp4", Some("en,de"), true);
+        let joined = args.join(" ");
+        assert!(joined.contains("--write-subs"));
+        assert!(joined.contains("--write-auto-subs"));
+        assert!(joined.contains("--sub-langs en,de"));
+        assert!(joined.contains("--convert-subs srt"));
+        assert!(joined.contains("--embed-subs"));
+        let no_embed = build_subtitle_args("mp4", Some("en"), false);
+        assert!(!no_embed.join(" ").contains("--embed-subs"));
     }
 
     #[test]
