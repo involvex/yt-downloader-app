@@ -150,14 +150,18 @@ fn exe_extension() -> &'static str {
     }
 }
 
-/// Resolve the directory containing the bundled `ffmpeg` sidecar so it can be
-/// passed to yt-dlp via `--ffmpeg-location`.
+/// Resolve the full path to the bundled `ffmpeg` sidecar binary so it can be
+/// passed directly to yt-dlp via `--ffmpeg-location`. yt-dlp accepts either a
+/// directory or the exact ffmpeg executable path; we pass the executable path
+/// because the bundled binary carries the target-triple suffix
+/// (`ffmpeg-x86_64-pc-windows-msvc.exe`) and yt-dlp cannot find it by name
+/// alone inside an arbitrary directory.
 ///
 /// Probes several candidate layouts because the bundle layout differs between
 /// `tauri dev` (binaries live in `src-tauri/binaries/`) and a packaged build
 /// (binaries live under the resource dir, with the target-triple suffix
 /// stripped by Tauri at bundle time).
-fn resolve_ffmpeg_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn resolve_ffmpeg_path(app: &AppHandle) -> Result<String, String> {
     let stem = format!("ffmpeg-{}{}", TARGET_TRIPLE, exe_extension());
     let plain = format!("ffmpeg{}", exe_extension());
 
@@ -189,9 +193,9 @@ fn resolve_ffmpeg_dir(app: &AppHandle) -> Result<PathBuf, String> {
     for candidate in &candidates {
         if candidate.is_file() {
             return candidate
-                .parent()
-                .map(PathBuf::from)
-                .ok_or_else(|| "Could not determine ffmpeg parent directory.".to_string());
+                .to_str()
+                .map(|s| s.to_string())
+                .ok_or_else(|| "Bundled ffmpeg path is not valid UTF-8.".to_string());
         }
     }
 
@@ -389,8 +393,7 @@ async fn download_media(
     let format = validate_format(&format)?;
     let sponsorblock = validate_sponsorblock(sponsorblock_remove)?;
 
-    let ffmpeg_dir = resolve_ffmpeg_dir(&app)?;
-    let ffmpeg_location = ffmpeg_dir.to_string_lossy().to_string();
+    let ffmpeg_path = resolve_ffmpeg_path(&app)?;
 
     let output_template = format!("{output_dir}/{template}");
 
@@ -426,7 +429,7 @@ async fn download_media(
         args.push("--no-playlist".to_string());
     }
     args.push("--ffmpeg-location".to_string());
-    args.push(ffmpeg_location);
+    args.push(ffmpeg_path);
     args.push("-o".to_string());
     args.push(output_template);
     args.push(url.clone());
