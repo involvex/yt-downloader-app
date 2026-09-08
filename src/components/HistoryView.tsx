@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { clearHistory, removeHistoryItem } from "../lib/store";
+import { t, useLocale } from "../lib/i18n.ts";
 import type { DownloadItem, DownloadStatus } from "../lib/types";
 
 interface HistoryViewProps {
@@ -24,6 +25,7 @@ function formatDate(ts: number): string {
 type StatusFilter = "all" | DownloadStatus;
 
 export default function HistoryView({ items, onHistoryChange, onRetry }: HistoryViewProps) {
+  const { locale } = useLocale();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
 
@@ -55,7 +57,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
   }
 
   async function handleDeleteFile(path: string) {
-    if (!confirm("Delete this file from disk? This cannot be undone.")) return;
+    if (!confirm(t(locale, "historyView.confirmDelete"))) return;
     try {
       await invoke("delete_downloaded_file", { path });
       await handleRemove(
@@ -97,10 +99,8 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
   if (items.length === 0) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-center">
-        <p className="text-sm text-zinc-400">No downloads yet.</p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Finished and failed downloads will appear here.
-        </p>
+        <p className="text-sm text-zinc-400">{t(locale, "historyView.noItems")}</p>
+        <p className="mt-1 text-xs text-zinc-500">{t(locale, "historyView.noItemsHint")}</p>
       </div>
     );
   }
@@ -108,24 +108,28 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="shrink-0 text-xs text-zinc-500">{filtered.length} item(s)</span>
+        <span className="shrink-0 text-xs text-zinc-500">
+          {t(locale, "historyView.itemsLabel", { n: filtered.length })}
+        </span>
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
-          placeholder="Search URL, title, path…"
+          placeholder={t(locale, "historyView.searchPlaceholder")}
           spellCheck={false}
           className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
         />
         <select
           value={status}
           onChange={(e) => setStatus(e.currentTarget.value as StatusFilter)}
-          title="Filter by status"
+          title={t(locale, "historyView.filterLabel")}
           className="shrink-0 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
         >
           {(["all", "queued", "downloading", "done", "error"] as StatusFilter[]).map((s) => (
             <option key={s} value={s}>
-              {s}
+              {s === "all"
+                ? t(locale, "historyView.filter.all")
+                : t(locale, `mainView.status.${s}`)}
             </option>
           ))}
         </select>
@@ -133,7 +137,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
           type="button"
           onClick={handleExportCsv}
           disabled={filtered.length === 0}
-          title="Export filtered history as CSV"
+          title={t(locale, "historyView.exportCsv")}
           className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
           CSV
@@ -142,7 +146,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
           type="button"
           onClick={handleExportJson}
           disabled={filtered.length === 0}
-          title="Export filtered history as JSON"
+          title={t(locale, "historyView.exportJson")}
           className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
           JSON
@@ -152,7 +156,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
           onClick={handleClear}
           className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
         >
-          Clear all
+          {t(locale, "historyView.clearAll")}
         </button>
       </div>
       {filtered.length === 0 && (
@@ -195,7 +199,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
           )}
           {item.error && (
             <details className="mt-1 text-[11px] text-red-300">
-              <summary className="cursor-pointer">Show error details</summary>
+              <summary className="cursor-pointer">{t(locale, "mainView.errorDetails")}</summary>
               <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
                 {item.error}
               </pre>
@@ -207,15 +211,15 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
               onClick={() => onRetry(item.url)}
               className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:border-zinc-500"
             >
-              Retry
+              {t(locale, "historyView.retry")}
             </button>
             {item.path && item.status === "done" && (
               <button
                 type="button"
                 onClick={() => void handleReveal(item.path)}
-                className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
               >
-                Show in folder
+                {t(locale, "historyView.showInFolder")}
               </button>
             )}
             {item.path && item.status === "done" && (
@@ -232,7 +236,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
               onClick={() => void handleRemove(item.id)}
               className="ml-auto rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:text-red-300"
             >
-              Remove
+              {t(locale, "historyView.remove")}
             </button>
           </div>
         </div>

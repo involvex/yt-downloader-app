@@ -10,6 +10,8 @@ export type DownloadStatus = "queued" | "downloading" | "done" | "error";
 
 export type PlaylistMode = "single" | "full";
 
+export type Locale = "de" | "en";
+
 export interface Settings {
   outputDir: string;
   quality: Quality;
@@ -21,6 +23,7 @@ export interface Settings {
   sponsorblockRemove: string;
   splitChapters: boolean;
   embedChapters: boolean;
+  locale: Locale;
 }
 
 export const SPONSORBLOCK_CATEGORIES = [

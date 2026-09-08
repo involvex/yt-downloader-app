@@ -3,10 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { saveSettings } from "../lib/store";
+import { LOCALES, t, useLocale } from "../lib/i18n.ts";
 import {
   FORMAT_OPTIONS,
   PLAYLIST_OPTIONS,
   QUALITY_OPTIONS,
+  type Locale,
   type MediaFormat,
   type PlaylistMode,
   type Quality,
@@ -20,6 +22,7 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({ settings, onSave }: SettingsViewProps) {
+  const { locale, setLocale } = useLocale();
   const [outputDir, setOutputDir] = useState(settings.outputDir);
   const [quality, setQuality] = useState<Quality>(settings.quality);
   const [defaultFormat, setDefaultFormat] = useState<MediaFormat>(settings.defaultFormat);
@@ -51,7 +54,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
         directory: true,
         multiple: false,
         defaultPath: outputDir || undefined,
-        title: "Choose download folder",
+        title: t(locale, "settingsView.downloadFolderLabel"),
       });
       if (typeof selected === "string" && selected.length > 0) {
         setOutputDir(selected);
@@ -73,16 +76,16 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
 
   async function handleSave() {
     if (!outputDir.trim()) {
-      setError("Output directory must not be empty.");
+      setError(t(locale, "settingsView.error.noOutputDir"));
       return;
     }
     const template = filenameTemplate.trim() || "%(title)s.%(ext)s";
     if (!template.includes("%(ext)s")) {
-      setError("Filename template must contain %(ext)s.");
+      setError(t(locale, "settingsView.error.noExt"));
       return;
     }
     if (/[\\/]/.test(template) || template.includes("..") || template.includes(":")) {
-      setError("Filename template must be a bare filename (no paths, '..' or ':').");
+      setError(t(locale, "settingsView.error.noPaths"));
       return;
     }
     const langs = subtitleLangs.trim();
@@ -91,7 +94,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       langs !== "all" &&
       !/^[A-Za-z][A-Za-z_-]{0,11}(,[A-Za-z][A-Za-z_-]{0,11})*$/.test(langs)
     ) {
-      setError('Subtitle languages must be comma-separated codes like "en,de".');
+      setError(t(locale, "settingsView.error.badLangs"));
       return;
     }
     const sb = sponsorblockRemove.trim();
@@ -101,7 +104,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
         sb
       )
     ) {
-      setError("Unknown SponsorBlock category.");
+      setError(t(locale, "settingsView.error.badSponsorblock"));
       return;
     }
     setError(null);
@@ -116,6 +119,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       sponsorblockRemove: sb,
       splitChapters,
       embedChapters,
+      locale: settings.locale,
     };
     await saveSettings(next);
     onSave(next);
@@ -145,21 +149,21 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
             onClick={openFolder}
             className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
           >
-            Open
+            {t(locale, "settingsView.openButton")}
           </button>
           <button
             type="button"
             onClick={pickDirectory}
             className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
           >
-            Browse…
+            {t(locale, "settingsView.browseButton")}
           </button>
         </div>
       </div>
 
       <div>
         <label htmlFor="template" className="mb-1 block text-xs font-medium text-zinc-400">
-          Filename template
+          {t(locale, "settingsView.filenameTemplateLabel")}
         </label>
         <input
           id="template"
@@ -174,13 +178,13 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
           className="w-full truncate rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-zinc-500"
         />
         <p className="mt-1 text-[11px] text-zinc-500">
-          Must contain %(ext)s. Windows-unsafe characters are sanitized automatically.
+          {t(locale, "settingsView.filenameTemplateHint")}
         </p>
       </div>
 
       <div>
         <label htmlFor="quality" className="mb-1 block text-xs font-medium text-zinc-400">
-          Default quality
+          {t(locale, "settingsView.defaultQualityLabel")}
         </label>
         <select
           id="quality"
@@ -193,7 +197,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
         >
           {QUALITY_OPTIONS.map((q) => (
             <option key={q.value} value={q.value}>
-              {q.label}
+              {t(locale, `qualityOptions.${q.value}`)}
             </option>
           ))}
         </select>
@@ -201,7 +205,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
 
       <div>
         <label htmlFor="defaultFormat" className="mb-1 block text-xs font-medium text-zinc-400">
-          Default format
+          {t(locale, "settingsView.defaultFormatLabel")}
         </label>
         <select
           id="defaultFormat"
@@ -214,7 +218,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
         >
           {FORMAT_OPTIONS.map((f) => (
             <option key={f.value} value={f.value}>
-              {f.label}
+              {t(locale, `formatOptions.${f.value}`)}
             </option>
           ))}
         </select>
@@ -222,7 +226,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
 
       <div>
         <label htmlFor="playlist" className="mb-1 block text-xs font-medium text-zinc-400">
-          Playlist handling
+          {t(locale, "settingsView.playlistLabel")}
         </label>
         <select
           id="playlist"
@@ -235,7 +239,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
         >
           {PLAYLIST_OPTIONS.map((p) => (
             <option key={p.value} value={p.value}>
-              {p.label}
+              {t(locale, `playlistOptions.${p.value}`)}
             </option>
           ))}
         </select>
@@ -243,7 +247,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
 
       <div>
         <label htmlFor="subLangs" className="mb-1 block text-xs font-medium text-zinc-400">
-          Default subtitles (video only)
+          {t(locale, "settingsView.subtitlesLabel")}
         </label>
         <input
           id="subLangs"
@@ -268,13 +272,13 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
             disabled={subtitleLangs.trim() === ""}
             className="accent-zinc-100"
           />
-          Embed subtitles in video file
+          {t(locale, "settingsView.embedSubtitles")}
         </label>
       </div>
 
       <div>
         <label htmlFor="sb" className="mb-1 block text-xs font-medium text-zinc-400">
-          SponsorBlock categories (video only)
+          {t(locale, "settingsView.sponsorblockLabel")}
         </label>
         <input
           id="sb"
@@ -299,7 +303,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
               }}
               className="accent-zinc-100"
             />
-            Split chapters
+            {t(locale, "settingsView.splitChapters")}
           </label>
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
             <input
@@ -311,9 +315,31 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
               }}
               className="accent-zinc-100"
             />
-            Embed chapters
+            {t(locale, "settingsView.embedChapters")}
           </label>
         </div>
+      </div>
+
+      <div>
+        <label htmlFor="locale" className="mb-1 block text-xs font-medium text-zinc-400">
+          {t(locale, "settingsView.languageLabel")}
+        </label>
+        <select
+          id="locale"
+          value={settings.locale}
+          onChange={(e) => {
+            const next = e.currentTarget.value as Locale;
+            setLocale(next);
+            setSaved(false);
+          }}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+        >
+          {(Object.keys(LOCALES) as Locale[]).map((l) => (
+            <option key={l} value={l}>
+              {t(locale, `settingsView.language.${l}`)}
+            </option>
+          ))}
+        </select>
       </div>
 
       <button
@@ -321,16 +347,18 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
         onClick={handleSave}
         className="rounded-lg bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-900 hover:bg-white"
       >
-        Save settings
+        {t(locale, "settingsView.saveButton")}
       </button>
 
-      {saved && <p className="text-xs text-emerald-400">Settings saved.</p>}
+      {saved && <p className="text-xs text-emerald-400">{t(locale, "settingsView.saved")}</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       <p className="font-mono text-[11px] text-zinc-500">
         {versions
-          ? `yt-dlp ${versions.ytdlp ?? "missing"} · ffmpeg ${versions.ffmpeg?.split(" ").slice(0, 3).join(" ") ?? "missing"}`
-          : "Sidecar versions unavailable."}
+          ? t(locale, "settingsView.sidecarVersions", {
+              v: `${versions.ytdlp ?? t(locale, "settingsView.sidecarUnavailable")} / ${versions.ffmpeg?.split(" ").slice(0, 3).join(" ") ?? t(locale, "settingsView.sidecarUnavailable")}`,
+            })
+          : t(locale, "settingsView.sidecarUnavailable")}
       </p>
     </div>
   );

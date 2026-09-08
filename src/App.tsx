@@ -3,17 +3,20 @@ import MainView from "./components/MainView";
 import HistoryView from "./components/HistoryView";
 import SettingsView from "./components/SettingsView";
 import { loadHistory, loadSettings } from "./lib/store";
+import { LocaleProvider } from "./lib/i18n.tsx";
+import { t, useLocale } from "./lib/i18n.ts";
 import type { DownloadItem, Settings } from "./lib/types";
 
 type Tab = "main" | "history" | "settings";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "main", label: "Download" },
-  { id: "history", label: "History" },
-  { id: "settings", label: "Settings" },
+const TABS: { id: Tab; key: string }[] = [
+  { id: "main", key: "tab.download" },
+  { id: "history", key: "tab.history" },
+  { id: "settings", key: "tab.settings" },
 ];
 
-export default function App() {
+function AppInner() {
+  const { locale } = useLocale();
   const [tab, setTab] = useState<Tab>("main");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [history, setHistory] = useState<DownloadItem[]>([]);
@@ -40,19 +43,21 @@ export default function App() {
   return (
     <div className="dark flex min-h-full flex-col bg-zinc-950 text-zinc-100">
       <header className="border-b border-zinc-800 px-4 pt-4">
-        <h1 className="text-base font-bold tracking-tight">Downloader</h1>
+        <h1 className="text-base font-bold tracking-tight">{t(locale, "headerTitle")}</h1>
         <nav className="mt-2 flex gap-1">
-          {TABS.map((t) => (
+          {TABS.map((tabItem) => (
             <button
-              key={t.id}
+              key={tabItem.id}
               type="button"
-              onClick={() => setTab(t.id)}
+              onClick={() => setTab(tabItem.id)}
               className={`rounded-t-lg px-4 py-2 text-xs font-semibold transition-colors ${
-                tab === t.id ? "bg-zinc-900 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+                tab === tabItem.id
+                  ? "bg-zinc-900 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {t.label}
-              {t.id === "history" && history.length > 0 && (
+              {t(locale, tabItem.key)}
+              {tabItem.id === "history" && history.length > 0 && (
                 <span className="ml-1.5 rounded-full bg-zinc-700 px-1.5 py-0.5 text-[10px]">
                   {history.length}
                 </span>
@@ -65,11 +70,11 @@ export default function App() {
       <main className="flex-1 bg-zinc-900/40 p-4">
         {loadError && (
           <div className="mb-3 rounded-lg border border-red-900 bg-red-950/40 p-3 text-xs text-red-200">
-            Failed to load settings: {loadError}
+            {t(locale, "loadError")} {loadError}
           </div>
         )}
         {!settings ? (
-          <p className="text-xs text-zinc-500">Loading…</p>
+          <p className="text-xs text-zinc-500">{t(locale, "loading")}</p>
         ) : (
           <>
             {tab === "main" && (
@@ -88,5 +93,13 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <LocaleProvider>
+      <AppInner />
+    </LocaleProvider>
   );
 }

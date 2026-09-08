@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { upsertHistoryItem } from "../lib/store";
+import { t, useLocale } from "../lib/i18n.ts";
 import {
   FORMAT_OPTIONS,
   PLAYLIST_OPTIONS,
@@ -91,6 +92,7 @@ function MetaCard({ meta }: { meta: VideoMetadata }) {
 }
 
 export default function MainView({ settings, initialUrl, onHistoryChange }: MainViewProps) {
+  const { locale } = useLocale();
   const [url, setUrl] = useState(initialUrl ?? "");
   const [format, setFormat] = useState<MediaFormat>(settings.defaultFormat);
   const [quality, setQuality] = useState<Quality>(settings.quality);
@@ -235,7 +237,10 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       setActive((prev) => {
         const cur = prev[job.id];
         if (!cur) return prev;
-        return { ...prev, [job.id]: { ...cur, status: "downloading", raw: "Starting…" } };
+        return {
+          ...prev,
+          [job.id]: { ...cur, status: "downloading", raw: t(locale, "mainView.starting") },
+        };
       });
       void runJob(job);
     }
@@ -278,7 +283,11 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         if (!cur || cur.status === "done") return prev;
         return {
           ...prev,
-          [job.id]: { ...cur, status: "error", error: cancelled ? "Download cancelled." : message },
+          [job.id]: {
+            ...cur,
+            status: "error",
+            error: cancelled ? t(locale, "mainView.cancelling") : message,
+          },
         };
       });
       const base = jobsRef.current.get(job.id);
@@ -286,7 +295,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         const next = {
           ...base,
           status: "error" as const,
-          error: cancelled ? "Download cancelled." : message,
+          error: cancelled ? t(locale, "mainView.cancelling") : message,
         };
         jobsRef.current.set(job.id, next);
         lastPersistRef.current[job.id] = Date.now();
@@ -305,11 +314,11 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     setMetaError(null);
 
     if (!/^https?:\/\//i.test(trimmed)) {
-      setUrlError("Enter a valid URL starting with http:// or https://");
+      setUrlError(t(locale, "mainView.urlError.http"));
       return;
     }
     if (!settings.outputDir.trim()) {
-      setUrlError("Choose a download folder in Settings first.");
+      setUrlError(t(locale, "mainView.urlError.noDir"));
       return;
     }
 
@@ -334,7 +343,10 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         format,
         quality,
         percent: 0,
-        raw: runningRef.current < MAX_CONCURRENT ? "Starting…" : "Queued…",
+        raw:
+          runningRef.current < MAX_CONCURRENT
+            ? t(locale, "mainView.starting")
+            : t(locale, "mainView.queued"),
         status: runningRef.current < MAX_CONCURRENT ? "downloading" : "queued",
       },
     }));
@@ -360,7 +372,10 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     setActive((prev) => {
       const cur = prev[id];
       if (!cur || cur.status === "done" || cur.status === "error") return prev;
-      return { ...prev, [id]: { ...cur, status: "error", error: "Cancelling…" } };
+      return {
+        ...prev,
+        [id]: { ...cur, status: "error", error: t(locale, "mainView.cancelling") },
+      };
     });
     try {
       await invoke("cancel_download", { id });
@@ -386,7 +401,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   async function fetchPreview() {
     const trimmed = url.trim();
     if (!/^https?:\/\//i.test(trimmed)) {
-      setUrlError("Enter a valid URL starting with http:// or https://");
+      setUrlError(t(locale, "mainView.urlError.http"));
       return;
     }
     setMetaLoading(true);
@@ -409,7 +424,8 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     <div className="flex flex-col gap-4">
       <div>
         <label htmlFor="url" className="mb-1 block text-xs font-medium text-zinc-400">
-          Video / Audio URL {dragOver && <span className="text-sky-300">— drop to fill</span>}
+          {t(locale, "mainView.urlLabel")}{" "}
+          {dragOver && <span className="text-sky-300">{t(locale, "mainView.dropHint")}</span>}
         </label>
         <div className="flex gap-2">
           <input
@@ -443,7 +459,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                 setUrlError(null);
               }
             }}
-            placeholder="https://… (paste, drop, or auto-filled from clipboard)"
+            placeholder={t(locale, "mainView.urlPlaceholder")}
             spellCheck={false}
             className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
           />
@@ -461,26 +477,28 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
             }}
             className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
           >
-            Paste
+            {t(locale, "mainView.pasteButton")}
           </button>
         </div>
-        {clipHint && <p className="mt-1 text-[11px] text-zinc-500">Filled from clipboard.</p>}
+        {clipHint && (
+          <p className="mt-1 text-[11px] text-zinc-500">{t(locale, "mainView.clipboardHint")}</p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor="format" className="text-xs font-medium text-zinc-400">
-          Format
+          {t(locale, "mainView.formatLabel")}
         </label>
         <select
           id="format"
           value={format}
           onChange={(e) => setFormat(e.currentTarget.value as MediaFormat)}
-          title="Download format"
+          title={t(locale, "mainView.formatTitle")}
           className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
         >
           {FORMAT_OPTIONS.map((f) => (
             <option key={f.value} value={f.value}>
-              {f.label}
+              {t(locale, `formatOptions.${f.value}`)}
             </option>
           ))}
         </select>
@@ -488,24 +506,24 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
           value={quality}
           onChange={(e) => setQuality(e.currentTarget.value as Quality)}
           disabled={!isVideoFormat(format)}
-          title="Download quality"
+          title={t(locale, "mainView.qualityTitle")}
           className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none disabled:opacity-40"
         >
           {QUALITY_OPTIONS.map((q) => (
             <option key={q.value} value={q.value}>
-              {q.label}
+              {t(locale, `qualityOptions.${q.value}`)}
             </option>
           ))}
         </select>
         <select
           value={playlist}
           onChange={(e) => setPlaylist(e.currentTarget.value as PlaylistMode)}
-          title="Playlist handling"
+          title={t(locale, "mainView.playlistTitle")}
           className="ml-auto rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
         >
           {PLAYLIST_OPTIONS.map((p) => (
             <option key={p.value} value={p.value}>
-              {p.label}
+              {t(locale, `playlistOptions.${p.value}`)}
             </option>
           ))}
         </select>
@@ -514,14 +532,14 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       {isVideoFormat(format) && (
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="subs" className="text-xs font-medium text-zinc-400">
-            Subtitles
+            {t(locale, "mainView.subsLabel")}
           </label>
           <input
             id="subs"
             type="text"
             value={subtitleLangs}
             onChange={(e) => setSubtitleLangs(e.currentTarget.value)}
-            placeholder="en,de — empty = off"
+            placeholder={t(locale, "mainView.subsPlaceholder")}
             spellCheck={false}
             className="w-44 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
           />
@@ -533,7 +551,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
               disabled={subtitleLangs.trim() === ""}
               className="accent-zinc-100"
             />
-            Embed in video
+            {t(locale, "mainView.embedSubs")}
           </label>
         </div>
       )}
@@ -541,14 +559,14 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       {isVideoFormat(format) && (
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="sb" className="text-xs font-medium text-zinc-400">
-            SponsorBlock
+            {t(locale, "mainView.sponsorblockLabel")}
           </label>
           <input
             id="sb"
             type="text"
             value={sponsorblockRemove}
             onChange={(e) => setSponsorblockRemove(e.currentTarget.value)}
-            placeholder="sponsor,selfpromo — empty = off"
+            placeholder={t(locale, "mainView.sponsorblockPlaceholder")}
             spellCheck={false}
             className="w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
           />
@@ -559,7 +577,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
               onChange={(e) => setSplitChapters(e.currentTarget.checked)}
               className="accent-zinc-100"
             />
-            Split chapters
+            {t(locale, "mainView.splitChapters")}
           </label>
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
             <input
@@ -568,7 +586,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
               onChange={(e) => setEmbedChapters(e.currentTarget.checked)}
               className="accent-zinc-100"
             />
-            Embed chapters
+            {t(locale, "mainView.embedChapters")}
           </label>
         </div>
       )}
@@ -581,22 +599,26 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
           disabled={!url.trim()}
           className="flex-1 rounded-lg bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {running > 0 ? `Queue download (${running} active)` : "Download"}
+          {running > 0
+            ? `${t(locale, "mainView.queueButton", { n: running })}`
+            : t(locale, "mainView.downloadButton")}
         </button>
         <button
           type="button"
           onClick={() => void fetchPreview()}
           disabled={!url.trim() || metaLoading}
-          title="Fetch title, uploader and duration without downloading"
+          title={t(locale, "mainView.previewButton")}
           className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-zinc-200 hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {metaLoading ? "Loading…" : "Preview"}
+          {metaLoading
+            ? `${t(locale, "mainView.previewLoading")}`
+            : `${t(locale, "mainView.previewButton")}`}
         </button>
       </div>
 
       {metaError && (
         <div className="rounded-lg border border-red-900 bg-red-950/40 p-3 text-xs text-red-200">
-          <p className="font-semibold">Preview failed</p>
+          <p className="font-semibold">{t(locale, "mainView.previewError")}</p>
           <p className="mt-1 break-words">{metaError}</p>
         </div>
       )}
@@ -605,7 +627,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       {items.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-            Queue — up to {MAX_CONCURRENT} at once
+            {t(locale, "mainView.queueLabel", { max: MAX_CONCURRENT })}
           </p>
           {items.map((job) => {
             const pct = Math.min(100, Math.max(0, job.percent));
@@ -620,7 +642,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                     {job.url}
                   </span>
                   <span className="shrink-0 font-mono text-sm font-semibold text-zinc-100">
-                    {job.status === "queued" ? "queued" : `${pct.toFixed(1)}%`}
+                    {job.status === "queued"
+                      ? t(locale, "mainView.status.queued")
+                      : `${pct.toFixed(1)}%`}
                   </span>
                 </div>
                 <div
@@ -636,8 +660,12 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                   />
                 </div>
                 <p className="mt-1 truncate font-mono text-[11px] text-zinc-500">
-                  {[job.speed, job.eta ? `ETA ${job.eta}` : null].filter(Boolean).join(" · ") ||
-                    job.raw}
+                  {[
+                    job.speed,
+                    job.eta ? `${t(locale, "mainView.etaPrefix", { eta: job.eta })}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(t(locale, "mainView.speedEta.sep")) || job.raw}
                 </p>
                 {job.status === "done" && job.donePath && (
                   <p className="mt-1 break-all font-mono text-[11px] text-emerald-300">
@@ -654,7 +682,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                       onClick={() => void cancelJob(job.id)}
                       className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:border-red-500 hover:text-red-300"
                     >
-                      Cancel
+                      {t(locale, "mainView.cancel")}
                     </button>
                   )}
                   {(job.status === "done" || job.status === "error") && (
@@ -663,7 +691,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                       onClick={() => dismissJob(job.id)}
                       className="rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:text-zinc-200"
                     >
-                      Dismiss
+                      {t(locale, "mainView.dismiss")}
                     </button>
                   )}
                 </div>

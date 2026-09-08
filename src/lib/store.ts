@@ -1,6 +1,6 @@
 import { Store } from "@tauri-apps/plugin-store";
 import { downloadDir } from "@tauri-apps/api/path";
-import { DEFAULT_FILENAME_TEMPLATE, type DownloadItem, type Settings } from "./types";
+import { DEFAULT_FILENAME_TEMPLATE, type DownloadItem, type Locale, type Settings } from "./types";
 
 const SETTINGS_FILE = "settings.json";
 const HISTORY_FILE = "history.json";
@@ -40,6 +40,7 @@ export async function loadSettings(): Promise<Settings> {
     (await store.get<string>("sponsorblockRemove").catch(() => null)) || "";
   const splitChapters = (await store.get<boolean>("splitChapters").catch(() => null)) ?? false;
   const embedChapters = (await store.get<boolean>("embedChapters").catch(() => null)) ?? false;
+  const locale = (await store.get<Locale>("locale").catch(() => null)) || "de";
   return {
     outputDir,
     quality,
@@ -51,6 +52,7 @@ export async function loadSettings(): Promise<Settings> {
     sponsorblockRemove,
     splitChapters,
     embedChapters,
+    locale,
   };
 }
 
@@ -66,6 +68,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await store.set("sponsorblockRemove", settings.sponsorblockRemove);
   await store.set("splitChapters", settings.splitChapters);
   await store.set("embedChapters", settings.embedChapters);
+  await store.set("locale", settings.locale);
   await store.save();
 }
 
