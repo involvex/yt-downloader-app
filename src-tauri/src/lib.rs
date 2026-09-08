@@ -150,12 +150,19 @@ fn exe_extension() -> &'static str {
     }
 }
 
-/// Resolve the full path to the bundled `ffmpeg` sidecar binary so it can be
-/// passed directly to yt-dlp via `--ffmpeg-location`. yt-dlp accepts either a
-/// directory or the exact ffmpeg executable path; we pass the executable path
-/// because the bundled binary carries the target-triple suffix
-/// (`ffmpeg-x86_64-pc-windows-msvc.exe`) and yt-dlp cannot find it by name
-/// alone inside an arbitrary directory.
+/// Resolve the directory containing a usable `ffmpeg.exe` for yt-dlp's
+/// `--ffmpeg-location` argument.
+///
+/// The bundled binary carries the target-triple suffix
+/// (`ffmpeg-x86_64-pc-windows-msvc.exe`), but yt-dlp looks for a binary named
+/// exactly `ffmpeg.exe` inside the given directory. We therefore:
+/// 1. Probe the same candidate layouts as before.
+/// 2. If we find the triple-suffixed binary but no plain `ffmpeg.exe` next to
+///    it, copy it to `ffmpeg.exe` once (dev-mode binaries dir is writable;
+///    packaged resource dirs may not be, in which case we fall back to
+///    returning the full triple-suffixed path).
+/// 3. Return the directory so `--ffmpeg-location` works with yt-dlp's normal
+///    directory-based lookup.
 ///
 /// Probes several candidate layouts because the bundle layout differs between
 /// `tauri dev` (binaries live in `src-tauri/binaries/`) and a packaged build
@@ -192,10 +199,22 @@ fn resolve_ffmpeg_path(app: &AppHandle) -> Result<String, String> {
 
     for candidate in &candidates {
         if candidate.is_file() {
+            if let Some(parent) = candidate.parent() {
+                let plain_path = parent.join(&plain);
+                if !plain_path.exists() {
+                    let _ = std::fs::copy(candidate, &plain_path);
+                }
+                if plain_path.exists() {
+                    return parent
+                        .to_str()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| "ffmpeg directory path is not valid UTF-8.".to_string());
+                }
+            }
             return candidate
                 .to_str()
                 .map(|s| s.to_string())
-                .ok_or_else(|| "Bundled ffmpeg path is not valid UTF-8.".to_string());
+                .ok_or_else(|| "ffmpeg path is not valid UTF-8.".to_string());
         }
     }
 
@@ -428,6 +447,8 @@ async fn download_media(
     } else {
         args.push("--no-playlist".to_string());
     }
+    args.push("--extractor-args".to_string());
+    args.push("youtube:player_client=android".to_string());
     args.push("--ffmpeg-location".to_string());
     args.push(ffmpeg_path);
     args.push("-o".to_string());
