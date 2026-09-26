@@ -46,6 +46,7 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
   const [embedChapters, setEmbedChapters] = useState(settings.embedChapters);
   const [localeDraft, setLocaleDraft] = useState<Locale>(settings.locale);
   const [versions, setVersions] = useState<SidecarVersions | null>(null);
+  const [fresh, setFresh] = useState<{ latest: string; stale: boolean } | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +60,38 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
       }
     })();
   }, []);
+
+  // Freshness check: compare the bundled yt-dlp date-version against the
+  // latest GitHub release. Result cached 24h in localStorage; offline or
+  // API failures stay silent.
+  useEffect(() => {
+    const bundled = versions?.ytdlp?.trim().replace(/^v/i, "");
+    if (!bundled) return;
+    (async () => {
+      try {
+        const cachedRaw = localStorage.getItem("ytdlp-latest");
+        let tag = "";
+        const cached = cachedRaw ? JSON.parse(cachedRaw) : null;
+        if (cached && typeof cached.tag === "string" && Date.now() - cached.at < 24 * 3600 * 1000) {
+          tag = cached.tag;
+        } else {
+          const res = await fetch("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest");
+          if (!res.ok) return;
+          const json = await res.json();
+          tag = String(json.tag_name ?? "")
+            .trim()
+            .replace(/^v/i, "");
+          if (!tag) return;
+          localStorage.setItem("ytdlp-latest", JSON.stringify({ tag, at: Date.now() }));
+        }
+        if (tag && tag !== bundled) {
+          setFresh({ latest: tag, stale: tag > bundled });
+        }
+      } catch {
+        // Offline or rate-limited — skip the check quietly.
+      }
+    })();
+  }, [versions]);
 
   async function pickDirectory() {
     try {
@@ -384,6 +417,17 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
           ? `${t(locale, "settingsView.sidecarYtdlp", { v: versions.ytdlp ?? t(locale, "settingsView.sidecarUnavailable") })} · ${t(locale, "settingsView.sidecarFfmpeg", { v: versions.ffmpeg?.split(" ").slice(0, 3).join(" ") ?? t(locale, "settingsView.sidecarUnavailable") })}`
           : t(locale, "settingsView.sidecarUnavailable")}
       </p>
+      {fresh?.stale && (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-900 bg-amber-950/40 p-2 text-xs text-amber-200"
+        >
+          {t(locale, "settingsView.ytdlpStale", {
+            bundled: versions?.ytdlp ?? "?",
+            latest: fresh.latest,
+          })}
+        </p>
+      )}
     </div>
   );
 }

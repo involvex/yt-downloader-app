@@ -204,6 +204,9 @@ export default function HistoryView({
             </span>
             <span className="text-[11px] text-zinc-500">
               {item.format.toUpperCase()} · {item.quality}
+              {(item.attempts ?? 1) > 1 && (
+                <> · {t(locale, "historyView.attempts", { n: item.attempts ?? 1 })}</>
+              )}
             </span>
             <span className="ml-auto shrink-0 text-[11px] text-zinc-500">
               {formatDate(item.createdAt, locale)}

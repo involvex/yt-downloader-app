@@ -53,6 +53,7 @@ export interface DownloadItem {
   path?: string;
   error?: string;
   createdAt: number;
+  attempts?: number;
 }
 
 export interface VideoMetadata {
@@ -62,6 +63,9 @@ export interface VideoMetadata {
   duration: number | null;
   thumbnail: string | null;
   webpage_url: string | null;
+  filesizeApprox: number | null;
+  ext: string | null;
+  resolution: string | null;
 }
 
 export interface SidecarVersions {
@@ -121,4 +125,17 @@ export function formatDuration(totalSeconds: number | null): string | null {
   const sec = s % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+export function formatBytes(bytes: number | null): string | null {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  const digits = v >= 100 ? 0 : v >= 10 ? 0 : 1;
+  return `${v.toFixed(digits)} ${units[i]}`;
 }

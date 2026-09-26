@@ -13,6 +13,7 @@ import {
   FORMAT_OPTIONS,
   PLAYLIST_OPTIONS,
   QUALITY_OPTIONS,
+  formatBytes,
   formatDuration,
   isVideoFormat,
   type CompleteEventPayload,
@@ -28,6 +29,20 @@ import {
 
 const MAX_CONCURRENT = 3;
 const HISTORY_PERSIST_THROTTLE_MS = 1000;
+// Frontend retries on top of yt-dlp's own `--retries 10`: transient blips
+// get up to 3 attempts total with 2s/4s backoff. Validation errors and
+// cancellations never retry.
+const MAX_RETRIES = 2;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientError(message: string): boolean {
+  return /timed out|timeout|connection|network|temporary|try again|econnreset|enotfound|epipe|broken pipe|reset by peer| 50[023]\b| 429\b|giving up after/i.test(
+    message
+  );
+}
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -73,11 +88,22 @@ interface QueuedJob {
   sponsorblockRemove: string;
   splitChapters: boolean;
   embedChapters: boolean;
+  attempt: number;
 }
 
 function MetaCard({ meta }: { meta: VideoMetadata }) {
   const [imgOk, setImgOk] = useState(true);
   const duration = meta.duration != null ? formatDuration(meta.duration) : null;
+  const size = formatBytes(meta.filesizeApprox);
+  const details = [
+    meta.uploader,
+    duration,
+    meta.resolution,
+    meta.ext ? meta.ext.toUpperCase() : null,
+    size ? `~${size}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="flex gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
       {meta.thumbnail != null && meta.thumbnail !== "" && imgOk && (
@@ -98,9 +124,7 @@ function MetaCard({ meta }: { meta: VideoMetadata }) {
       )}
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-zinc-100">{meta.title ?? "Untitled"}</p>
-        <p className="mt-0.5 truncate text-[11px] text-zinc-400">
-          {[meta.uploader, duration].filter(Boolean).join(" · ")}
-        </p>
+        <p className="mt-0.5 truncate text-[11px] text-zinc-400">{details}</p>
       </div>
     </div>
   );
@@ -142,6 +166,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   const runningRef = useRef(0);
   const seqRef = useRef(0);
   const localeRef = useRef(locale);
+  const activeRef = useRef(active);
+  const startRef = useRef<() => void>(() => {});
+  const cancelNewestRef = useRef<() => void>(() => {});
   const lastPersistRef = useRef<Record<string, number>>({});
   const onHistoryChangeRef = useRef(onHistoryChange);
   const settingsRef = useRef(settings);
@@ -152,6 +179,18 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     onHistoryChangeRef.current = onHistoryChange;
     settingsRef.current = settings;
     localeRef.current = locale;
+    activeRef.current = active;
+    startRef.current = () => {
+      void startDownload();
+    };
+    cancelNewestRef.current = () => {
+      const busy = Object.values(activeRef.current).filter(
+        (j) => j.status === "downloading" || j.status === "queued"
+      );
+      if (busy.length === 0) return;
+      const newest = busy.reduce((a, b) => (a.seq > b.seq ? a : b));
+      void cancelJob(newest.id);
+    };
   });
 
   // FEAT-006: clipboard auto-detect on mount + window focus (only when the
@@ -184,6 +223,51 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     }
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  // Shortcuts: Ctrl/Cmd+Enter starts (or queues) a download from anywhere,
+  // Esc cancels the newest running/queued job. Plain Ctrl+V is untouched so
+  // native paste in the URL field keeps working.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        startRef.current();
+      } else if (e.key === "Escape") {
+        cancelNewestRef.current();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Window-level drop: URLs dropped outside the input still land in it.
+  // Drops directly on inputs/selects keep their own handlers.
+  useEffect(() => {
+    function onDragOver(e: DragEvent) {
+      const types = e.dataTransfer?.types ?? [];
+      if (types.includes("text/uri-list") || types.includes("text/plain")) {
+        e.preventDefault();
+      }
+    }
+    function onDrop(e: DragEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input,select,textarea")) return;
+      const text =
+        e.dataTransfer?.getData("text/uri-list") ?? e.dataTransfer?.getData("text/plain") ?? "";
+      const found = extractHttpUrl(text);
+      if (found) {
+        e.preventDefault();
+        setUrl(found);
+        setUrlError(null);
+      }
+    }
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
   }, []);
 
   // Global listeners (one set per mount) routed by payload id — enables the
@@ -284,58 +368,95 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
 
   async function runJob(job: QueuedJob) {
     const s = settingsRef.current;
+    let attempt = job.attempt ?? 0;
     try {
-      const finalPath = await invoke<string>("download_media", {
-        id: job.id,
-        url: job.url,
-        format: job.format,
-        quality: job.quality,
-        outputDir: s.outputDir,
-        playlist: job.playlist,
-        filenameTemplate: s.filenameTemplate,
-        subtitleLangs: job.subtitleLangs,
-        embedSubs: job.embedSubs,
-        sponsorblockRemove: job.sponsorblockRemove,
-        splitChapters: job.splitChapters,
-        embedChapters: job.embedChapters,
-      });
-      setActive((prev) => {
-        const cur = prev[job.id];
-        if (!cur || cur.status === "done") return prev;
-        return { ...prev, [job.id]: { ...cur, status: "done", percent: 100, donePath: finalPath } };
-      });
-      const base = jobsRef.current.get(job.id);
-      if (base && base.status !== "done") {
-        const next = { ...base, status: "done" as const, percent: 100, path: finalPath };
-        jobsRef.current.set(job.id, next);
-        lastPersistRef.current[job.id] = Date.now();
-        onHistoryChangeRef.current(await upsertHistoryItem(next));
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const cancelled = /cancelled/i.test(message);
-      setActive((prev) => {
-        const cur = prev[job.id];
-        if (!cur || cur.status === "done") return prev;
-        return {
-          ...prev,
-          [job.id]: {
-            ...cur,
-            status: "error",
-            error: cancelled ? t(locale, "mainView.cancelling") : message,
-          },
-        };
-      });
-      const base = jobsRef.current.get(job.id);
-      if (base && base.status !== "done") {
-        const next = {
-          ...base,
-          status: "error" as const,
-          error: cancelled ? t(locale, "mainView.cancelling") : message,
-        };
-        jobsRef.current.set(job.id, next);
-        lastPersistRef.current[job.id] = Date.now();
-        onHistoryChangeRef.current(await upsertHistoryItem(next));
+      while (true) {
+        try {
+          const finalPath = await invoke<string>("download_media", {
+            id: job.id,
+            url: job.url,
+            format: job.format,
+            quality: job.quality,
+            outputDir: s.outputDir,
+            playlist: job.playlist,
+            filenameTemplate: s.filenameTemplate,
+            subtitleLangs: job.subtitleLangs,
+            embedSubs: job.embedSubs,
+            sponsorblockRemove: job.sponsorblockRemove,
+            splitChapters: job.splitChapters,
+            embedChapters: job.embedChapters,
+          });
+          setActive((prev) => {
+            const cur = prev[job.id];
+            if (!cur || cur.status === "done") return prev;
+            return {
+              ...prev,
+              [job.id]: { ...cur, status: "done", percent: 100, donePath: finalPath },
+            };
+          });
+          const base = jobsRef.current.get(job.id);
+          if (base && base.status !== "done") {
+            const next = {
+              ...base,
+              status: "done" as const,
+              percent: 100,
+              path: finalPath,
+              attempts: attempt + 1,
+            };
+            jobsRef.current.set(job.id, next);
+            lastPersistRef.current[job.id] = Date.now();
+            onHistoryChangeRef.current(await upsertHistoryItem(next));
+          }
+          return;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const cancelled = /cancelled/i.test(message);
+          if (!cancelled && attempt < MAX_RETRIES && isTransientError(message)) {
+            attempt += 1;
+            const retryRaw = t(localeRef.current, "mainView.retrying", { n: attempt + 1 });
+            setActive((prev) => {
+              const cur = prev[job.id];
+              if (!cur || cur.status === "done") return prev;
+              return { ...prev, [job.id]: { ...cur, status: "downloading", raw: retryRaw } };
+            });
+            const retryBase = jobsRef.current.get(job.id);
+            if (retryBase && retryBase.status !== "done") {
+              const next = {
+                ...retryBase,
+                status: "downloading" as const,
+                attempts: attempt + 1,
+                error: message,
+              };
+              jobsRef.current.set(job.id, next);
+              lastPersistRef.current[job.id] = Date.now();
+              onHistoryChangeRef.current(await upsertHistoryItem(next));
+            }
+            await sleep(2000 * attempt);
+            continue;
+          }
+          const finalMessage = cancelled ? t(locale, "mainView.cancelling") : message;
+          setActive((prev) => {
+            const cur = prev[job.id];
+            if (!cur || cur.status === "done") return prev;
+            return {
+              ...prev,
+              [job.id]: { ...cur, status: "error", error: finalMessage },
+            };
+          });
+          const base = jobsRef.current.get(job.id);
+          if (base && base.status !== "done") {
+            const next = {
+              ...base,
+              status: "error" as const,
+              error: finalMessage,
+              attempts: attempt + 1,
+            };
+            jobsRef.current.set(job.id, next);
+            lastPersistRef.current[job.id] = Date.now();
+            onHistoryChangeRef.current(await upsertHistoryItem(next));
+          }
+          return;
+        }
       }
     } finally {
       runningRef.current = Math.max(0, runningRef.current - 1);
@@ -368,6 +489,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       status: runningRef.current < MAX_CONCURRENT ? "downloading" : "queued",
       percent: 0,
       createdAt: Date.now(),
+      attempts: 1,
     };
     jobsRef.current.set(id, base);
     onHistoryChangeRef.current(await upsertHistoryItem(base));
@@ -398,6 +520,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       sponsorblockRemove: sponsorblockRemove.trim(),
       splitChapters,
       embedChapters,
+      attempt: 0,
     });
     setUrl("");
     setMeta(null);

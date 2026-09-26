@@ -37,6 +37,49 @@ struct VideoMetadata {
     duration: Option<f64>,
     thumbnail: Option<String>,
     webpage_url: Option<String>,
+    filesize_approx: Option<f64>,
+    ext: Option<String>,
+    resolution: Option<String>,
+}
+
+fn parse_video_metadata(v: &serde_json::Value) -> VideoMetadata {
+    let resolution = v
+        .get("resolution")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            match (
+                v.get("width").and_then(|x| x.as_u64()),
+                v.get("height").and_then(|x| x.as_u64()),
+            ) {
+                (Some(w), Some(h)) => Some(format!("{w}x{h}")),
+                _ => None,
+            }
+        });
+    VideoMetadata {
+        id: v.get("id").and_then(|x| x.as_str()).map(str::to_string),
+        title: v.get("title").and_then(|x| x.as_str()).map(str::to_string),
+        uploader: v
+            .get("uploader")
+            .or_else(|| v.get("channel"))
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
+        duration: v.get("duration").and_then(|x| x.as_f64()),
+        thumbnail: v
+            .get("thumbnail")
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
+        webpage_url: v
+            .get("webpage_url")
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
+        filesize_approx: v
+            .get("filesize_approx")
+            .or_else(|| v.get("filesize"))
+            .and_then(|x| x.as_f64()),
+        ext: v.get("ext").and_then(|x| x.as_str()).map(str::to_string),
+        resolution,
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -754,24 +797,7 @@ async fn fetch_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
 
     let v: serde_json::Value =
         serde_json::from_str(&stdout).map_err(|_| "Could not parse video info.".to_string())?;
-    Ok(VideoMetadata {
-        id: v.get("id").and_then(|x| x.as_str()).map(str::to_string),
-        title: v.get("title").and_then(|x| x.as_str()).map(str::to_string),
-        uploader: v
-            .get("uploader")
-            .or_else(|| v.get("channel"))
-            .and_then(|x| x.as_str())
-            .map(str::to_string),
-        duration: v.get("duration").and_then(|x| x.as_f64()),
-        thumbnail: v
-            .get("thumbnail")
-            .and_then(|x| x.as_str())
-            .map(str::to_string),
-        webpage_url: v
-            .get("webpage_url")
-            .and_then(|x| x.as_str())
-            .map(str::to_string),
-    })
+    Ok(parse_video_metadata(&v))
     };
     let meta = match tokio::time::timeout(std::time::Duration::from_secs(20), fetch).await {
         Ok(r) => r?,
@@ -1013,8 +1039,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_regex_matches_ytdlp_lines() {
-        let progress_re =
+    fn progress_regex_matches_ytdlp_lines() {        let progress_re =
             Regex::new(r"\[download\]\s+(\d+(?:\.\d+)?)%").expect("valid progress regex");
         let speed_re = Regex::new(r"at\s+(\S+/s)").expect("valid speed regex");
         let eta_re = Regex::new(r"ETA\s+(\S+)").expect("valid eta regex");
@@ -1030,5 +1055,28 @@ mod tests {
             Some("00:07")
         );
         assert!(progress_re.captures("[download] Downloading video 2 of 5").is_none());
+    }
+
+    #[test]
+    fn metadata_parsing_picks_size_ext_resolution() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"id":"abc","title":"T","uploader":"U","duration":61.5,
+                "thumbnail":"https://i.ytimg.com/vi/abc/hqdefault.jpg",
+                "webpage_url":"https://youtu.be/abc","filesize_approx":12345678,
+                "ext":"mp4","width":1920,"height":1080}"#,
+        )
+        .unwrap();
+        let m = parse_video_metadata(&v);
+        assert_eq!(m.id.as_deref(), Some("abc"));
+        assert_eq!(m.filesize_approx, Some(12345678.0));
+        assert_eq!(m.ext.as_deref(), Some("mp4"));
+        assert_eq!(m.resolution.as_deref(), Some("1920x1080"));
+
+        // Missing size fields stay null; explicit resolution string wins.
+        let v2: serde_json::Value =
+            serde_json::from_str(r#"{"resolution":"1280x720"}"#).unwrap();
+        let m2 = parse_video_metadata(&v2);
+        assert_eq!(m2.filesize_approx, None);
+        assert_eq!(m2.resolution.as_deref(), Some("1280x720"));
     }
 }
