@@ -204,17 +204,13 @@ fn resolve_ffmpeg_path(app: &AppHandle) -> Result<String, String> {
                 if !plain_path.exists() {
                     let _ = std::fs::copy(candidate, &plain_path);
                 }
-                if plain_path.exists() {
-                    return parent
-                        .to_str()
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| "ffmpeg directory path is not valid UTF-8.".to_string());
-                }
+                // Always return the directory: yt-dlp `--ffmpeg-location`
+                // expects a directory, never a file path.
+                return parent
+                    .to_str()
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| "ffmpeg directory path is not valid UTF-8.".to_string());
             }
-            return candidate
-                .to_str()
-                .map(|s| s.to_string())
-                .ok_or_else(|| "ffmpeg path is not valid UTF-8.".to_string());
         }
     }
 
@@ -350,6 +346,31 @@ fn validate_format(raw: &str) -> Result<String, String> {
     }
 }
 
+/// Quality allow-list shared with the frontend `QUALITY_OPTIONS`.
+/// Unknown values fall back to `best` so older settings never break a
+/// download; empty input also means `best`.
+fn validate_quality(raw: &str) -> String {
+    match raw.trim() {
+        "2160p" | "1440p" | "1080p" | "720p" | "480p" | "360p" | "240p" => {
+            raw.trim().to_string()
+        }
+        _ => "best".to_string(),
+    }
+}
+
+/// Cap buffered stderr so a verbose playlist failure can't bloat memory or
+/// `history.json`. Keeps the tail (the actionable part).
+fn push_stderr_capped(buf: &mut String, chunk: &str) {
+    const MAX_STDERR: usize = 64 * 1024;
+    buf.push_str(chunk);
+    if buf.len() > MAX_STDERR {
+        let tail = buf[buf.len() - MAX_STDERR..].to_string();
+        // Cut at the first newline so we don't keep half a line.
+        let cut = tail.find('\n').map(|i| i + 1).unwrap_or(0);
+        *buf = tail[cut..].to_string();
+    }
+}
+
 fn build_format_args(format: &str, quality: &str) -> Vec<String> {
     if format != "mp4" {
         // Validated by `validate_format`; fall back to mp3 defensively.
@@ -410,6 +431,7 @@ async fn download_media(
     let template = validate_template(filename_template)?;
     let subtitle_langs = validate_subtitle_langs(subtitle_langs)?;
     let format = validate_format(&format)?;
+    let quality = validate_quality(&quality);
     let sponsorblock = validate_sponsorblock(sponsorblock_remove)?;
 
     let ffmpeg_path = resolve_ffmpeg_path(&app)?;
@@ -480,6 +502,12 @@ async fn download_media(
 
     let mut stderr_buf = String::new();
     let mut final_path = String::new();
+    // Progress coalescing: yt-dlp can emit >10 lines/s; only forward when
+    // the percent moved >= 0.5 or 250ms elapsed since the last emit.
+    let mut last_emit_pct = -10.0f32;
+    let mut last_emit_at = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap_or_else(std::time::Instant::now);
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -497,24 +525,32 @@ async fn download_media(
                     }
                     if let Some(cap) = progress_re.captures(line) {
                         let percent: f32 = cap[1].parse().unwrap_or(0.0);
-                        let speed = speed_re.captures(line).map(|c| c[1].to_string());
-                        let eta = eta_re.captures(line).map(|c| c[1].to_string());
-                        let _ = app.emit(
-                            "download-progress",
-                            ProgressPayload {
-                                id: id.clone(),
-                                percent,
-                                speed,
-                                eta,
-                                raw: line.to_string(),
-                            },
-                        );
+                        let now = std::time::Instant::now();
+                        let pct_delta = (percent - last_emit_pct).abs();
+                        if pct_delta >= 0.5
+                            || now.duration_since(last_emit_at).as_millis() >= 250
+                        {
+                            last_emit_pct = percent;
+                            last_emit_at = now;
+                            let speed = speed_re.captures(line).map(|c| c[1].to_string());
+                            let eta = eta_re.captures(line).map(|c| c[1].to_string());
+                            let _ = app.emit(
+                                "download-progress",
+                                ProgressPayload {
+                                    id: id.clone(),
+                                    percent,
+                                    speed,
+                                    eta,
+                                    raw: line.to_string(),
+                                },
+                            );
+                        }
                     }
                 }
             }
             CommandEvent::Stderr(line) => {
                 let text = String::from_utf8_lossy(&line);
-                stderr_buf.push_str(&text);
+                push_stderr_capped(&mut stderr_buf, &text);
             }
             CommandEvent::Error(message) => {
                 let _ = children().lock().map(|mut m| m.remove(&id));
@@ -577,23 +613,52 @@ async fn download_media(
 }
 
 /// FEAT-013: delete a downloaded file from disk. User-initiated, path comes
-/// from history (never from arbitrary pasted text). Uses `fs` plugin so it
-/// respects the app's sandbox — no new capability needed beyond what's
-/// already in `default.json`.
+/// from history (never from arbitrary pasted text). The path must resolve
+/// inside the configured `output_dir` subtree — anything else is rejected.
 #[tauri::command]
-async fn delete_downloaded_file(_app: AppHandle, path: String) -> Result<(), String> {
+async fn delete_downloaded_file(
+    _app: AppHandle,
+    path: String,
+    output_dir: Option<String>,
+) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("Path must not be empty.".to_string());
     }
-    let pb = PathBuf::from(trimmed);
-    if !pb.exists() {
-        return Err("File does not exist.".to_string());
-    }
-    if !pb.is_file() {
+    let target = PathBuf::from(trimmed);
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|_| "File does not exist.".to_string())?;
+    if !canonical_target.is_file() {
         return Err("Path is not a file.".to_string());
     }
-    std::fs::remove_file(&pb).map_err(|e| format!("Failed to delete file: {e}"))
+    // Containment: the target must live inside the configured output dir.
+    // The frontend always passes `settings.outputDir`; without it we refuse
+    // rather than guess, so `invoke` can't become an arbitrary-delete primitive.
+    let dir_raw = output_dir.unwrap_or_default();
+    if dir_raw.trim().is_empty() {
+        return Err("Output directory is required.".to_string());
+    }
+    let contained = match (
+        PathBuf::from(dir_raw.trim()).canonicalize(),
+        canonical_target.parent(),
+    ) {
+        (Ok(canon_dir), Some(parent)) => parent.starts_with(&canon_dir),
+        _ => {
+            let want = dir_raw.trim().replace('\\', "/").trim_end_matches('/').to_lowercase();
+            match canonical_target.parent() {
+                Some(parent) => {
+                    let got = parent.to_string_lossy().replace('\\', "/").to_lowercase();
+                    got == want || got.starts_with(&format!("{want}/"))
+                }
+                None => false,
+            }
+        }
+    };
+    if !contained {
+        return Err("File is outside the download folder.".to_string());
+    }
+    std::fs::remove_file(&canonical_target).map_err(|e| format!("Failed to delete file: {e}"))
 }
 
 /// FEAT-002: cancel a running download. No new capability needed —
@@ -620,23 +685,39 @@ async fn cancel_download(id: String) -> Result<(), String> {
 
 /// FEAT-003: metadata preview via `yt-dlp --dump-single-json`.
 /// Playlist enforced to single item — full-list browsing is FEAT-004 follow-up.
+/// Results are cached in-memory for 10 minutes; the sidecar call times out
+/// after 20s so a hung yt-dlp can't hang `invoke` forever.
+fn metadata_cache() -> &'static Mutex<HashMap<String, (std::time::Instant, VideoMetadata)>> {
+    static MAP: OnceLock<Mutex<HashMap<String, (std::time::Instant, VideoMetadata)>>> =
+        OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 #[tauri::command]
 async fn fetch_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, String> {
     let url = validate_url(&url)?;
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("Failed to resolve yt-dlp sidecar: {e}"))?
-        .args([
-            "--dump-single-json",
-            "--no-playlist",
-            "--skip-download",
-            "--no-warnings",
-            &url,
-        ])
-        .spawn()
-        .map_err(|e| format!("Failed to spawn yt-dlp sidecar: {e}"))?;
-    drop(child);
+    if let Ok(cache) = metadata_cache().lock() {
+        if let Some((at, meta)) = cache.get(&url) {
+            if at.elapsed().as_secs() < 600 {
+                return Ok(meta.clone());
+            }
+        }
+    }
+    let fetch = async {
+        let (mut rx, child) = app
+            .shell()
+            .sidecar("yt-dlp")
+            .map_err(|e| format!("Failed to resolve yt-dlp sidecar: {e}"))?
+            .args([
+                "--dump-single-json",
+                "--no-playlist",
+                "--skip-download",
+                "--no-warnings",
+                &url,
+            ])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn yt-dlp sidecar: {e}"))?;
+        drop(child);
 
     let mut stdout = String::new();
     let mut stderr_buf = String::new();
@@ -644,9 +725,12 @@ async fn fetch_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
         match event {
             CommandEvent::Stdout(line) => {
                 stdout.push_str(&String::from_utf8_lossy(&line));
+                if stdout.len() > 4 * 1024 * 1024 {
+                    return Err("Video info is too large (playlist?).".to_string());
+                }
             }
             CommandEvent::Stderr(line) => {
-                stderr_buf.push_str(&String::from_utf8_lossy(&line));
+                push_stderr_capped(&mut stderr_buf, &String::from_utf8_lossy(&line));
             }
             CommandEvent::Terminated(payload) => {
                 if payload.code.unwrap_or(-1) != 0 {
@@ -688,12 +772,44 @@ async fn fetch_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
             .and_then(|x| x.as_str())
             .map(str::to_string),
     })
+    };
+    let meta = match tokio::time::timeout(std::time::Duration::from_secs(20), fetch).await {
+        Ok(r) => r?,
+        Err(_) => return Err("Fetching video info timed out after 20s.".to_string()),
+    };
+    if let Ok(mut cache) = metadata_cache().lock() {
+        cache.insert(url.clone(), (std::time::Instant::now(), meta.clone()));
+        // Bound the cache so repeated previews can't grow memory forever.
+        if cache.len() > 50 {
+            if let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, (at, _))| *at)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest);
+            }
+        }
+    }
+    Ok(meta)
 }
 
 /// FEAT-005: show bundled sidecar versions in Settings so users can tell a
 /// stale yt-dlp (the usual cause of sudden YouTube failures) apart.
+/// Cached for 5 minutes; both sidecars are probed concurrently.
+fn versions_cache() -> &'static Mutex<Option<(std::time::Instant, SidecarVersions)>> {
+    static CELL: OnceLock<Mutex<Option<(std::time::Instant, SidecarVersions)>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
 #[tauri::command]
 async fn get_sidecar_versions(app: AppHandle) -> SidecarVersions {
+    if let Ok(cache) = versions_cache().lock() {
+        if let Some((at, v)) = cache.as_ref() {
+            if at.elapsed().as_secs() < 300 {
+                return v.clone();
+            }
+        }
+    }
     async fn first_line(app: &AppHandle, sidecar: &str, args: &[&str]) -> Option<String> {
         let (mut rx, child) = app.shell().sidecar(sidecar).ok()?.args(args).spawn().ok()?;
         drop(child);
@@ -714,9 +830,15 @@ async fn get_sidecar_versions(app: AppHandle) -> SidecarVersions {
         Some(first.chars().take(80).collect())
     }
 
-    let ytdlp = first_line(&app, "yt-dlp", &["--version"]).await;
-    let ffmpeg = first_line(&app, "ffmpeg", &["-version"]).await;
-    SidecarVersions { ytdlp, ffmpeg }
+    let (ytdlp, ffmpeg) = tokio::join!(
+        first_line(&app, "yt-dlp", &["--version"]),
+        first_line(&app, "ffmpeg", &["-version"])
+    );
+    let versions = SidecarVersions { ytdlp, ffmpeg };
+    if let Ok(mut cache) = versions_cache().lock() {
+        *cache = Some((std::time::Instant::now(), versions.clone()));
+    }
+    versions
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -726,6 +848,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             download_media,
@@ -865,5 +988,47 @@ mod tests {
         assert!(validate_template(Some("../x.%(ext)s".into())).is_err());
         assert!(validate_template(Some("sub/dir.%(ext)s".into())).is_err());
         assert!(validate_template(Some("C:\\x.%(ext)s".into())).is_err());
+    }
+
+    #[test]
+    fn quality_validation_allows_only_known() {
+        assert_eq!(validate_quality("best"), "best");
+        assert_eq!(validate_quality("1080p"), "1080p");
+        assert_eq!(validate_quality("240p"), "240p");
+        assert_eq!(validate_quality(""), "best");
+        assert_eq!(validate_quality(" 720p "), "720p");
+        // Unknown values fall back to best so old settings never break.
+        assert_eq!(validate_quality("8k"), "best");
+        assert_eq!(validate_quality("mp3; rm -rf"), "best");
+    }
+
+    #[test]
+    fn stderr_buffer_is_capped() {
+        let mut buf = String::new();
+        push_stderr_capped(&mut buf, &"x".repeat(70 * 1024));
+        assert!(buf.len() <= 64 * 1024);
+        // Keeps the tail (most recent, actionable output).
+        push_stderr_capped(&mut buf, "TAIL-MARKER");
+        assert!(buf.ends_with("TAIL-MARKER"));
+    }
+
+    #[test]
+    fn progress_regex_matches_ytdlp_lines() {
+        let progress_re =
+            Regex::new(r"\[download\]\s+(\d+(?:\.\d+)?)%").expect("valid progress regex");
+        let speed_re = Regex::new(r"at\s+(\S+/s)").expect("valid speed regex");
+        let eta_re = Regex::new(r"ETA\s+(\S+)").expect("valid eta regex");
+        let line = "[download]  12.3% of ~10.00MiB at 1.23MiB/s ETA 00:07";
+        let cap = progress_re.captures(line).expect("progress matches");
+        assert_eq!(&cap[1], "12.3");
+        assert_eq!(
+            speed_re.captures(line).map(|c| c[1].to_string()).as_deref(),
+            Some("1.23MiB/s")
+        );
+        assert_eq!(
+            eta_re.captures(line).map(|c| c[1].to_string()).as_deref(),
+            Some("00:07")
+        );
+        assert!(progress_re.captures("[download] Downloading video 2 of 5").is_none());
     }
 }

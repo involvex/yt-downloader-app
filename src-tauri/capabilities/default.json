@@ -10,6 +10,7 @@
     "store:default",
     "dialog:default",
     "fs:default",
+    "notification:default",
     {
       "identifier": "shell:allow-spawn",
       "allow": [
