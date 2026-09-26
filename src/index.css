@@ -14,3 +14,36 @@ body {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+::selection {
+  background-color: #3f3f46;
+  color: #fafafa;
+}
+
+:focus-visible {
+  outline: 2px solid #71717a;
+  outline-offset: 1px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #3f3f46;
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+img {
+  -webkit-user-drag: none;
+}

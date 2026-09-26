@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { confirm, message, save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { clearHistory, removeHistoryItem } from "../lib/store";
 import { t, useLocale } from "../lib/i18n.ts";
@@ -9,6 +11,7 @@ interface HistoryViewProps {
   items: DownloadItem[];
   onHistoryChange: (items: DownloadItem[]) => void;
   onRetry: (url: string) => void;
+  outputDir?: string;
 }
 
 const STATUS_STYLES: Record<DownloadStatus, string> = {
@@ -18,16 +21,22 @@ const STATUS_STYLES: Record<DownloadStatus, string> = {
   error: "bg-red-950 text-red-300",
 };
 
-function formatDate(ts: number): string {
-  return new Date(ts).toLocaleString();
+function formatDate(ts: number, locale: string): string {
+  return new Date(ts).toLocaleString(locale === "de" ? "de-DE" : "en-US");
 }
 
 type StatusFilter = "all" | DownloadStatus;
 
-export default function HistoryView({ items, onHistoryChange, onRetry }: HistoryViewProps) {
+export default function HistoryView({
+  items,
+  onHistoryChange,
+  onRetry,
+  outputDir,
+}: HistoryViewProps) {
   const { locale } = useLocale();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const q = query.trim().toLowerCase();
   const filtered = items.filter((item) => {
@@ -43,6 +52,11 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
   }
 
   async function handleClear() {
+    const ok = await confirm(t(locale, "historyView.confirmClear"), {
+      title: t(locale, "historyView.clearAll"),
+      kind: "warning",
+    }).catch(() => false);
+    if (!ok) return;
     await clearHistory();
     onHistoryChange([]);
   }
@@ -56,44 +70,52 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
     }
   }
 
-  async function handleDeleteFile(path: string) {
-    if (!confirm(t(locale, "historyView.confirmDelete"))) return;
+  async function handleDeleteFile(item: DownloadItem) {
+    if (!item.path) return;
+    const ok = await confirm(t(locale, "historyView.confirmDelete"), {
+      title: t(locale, "historyView.deleteFile"),
+      kind: "warning",
+    }).catch(() => false);
+    if (!ok) return;
     try {
-      await invoke("delete_downloaded_file", { path });
-      await handleRemove(
-        items.find((i) => i.path === path)?.id ?? items.find((i) => i.path === path)?.id ?? ""
-      );
+      setActionError(null);
+      await invoke("delete_downloaded_file", { path: item.path, outputDir: outputDir ?? "" });
+      onHistoryChange(await removeHistoryItem(item.id));
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setActionError(msg);
+      await message(msg, { title: t(locale, "historyView.deleteError"), kind: "error" }).catch(
+        () => {}
+      );
     }
   }
 
-  async function handleExportJson() {
-    const data = JSON.stringify(filtered, null, 2);
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `history-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function exportToFile(kind: "json" | "csv") {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const suggested = `history-${stamp}.${kind}`;
+    try {
+      setActionError(null);
+      const data = kind === "json" ? JSON.stringify(filtered, null, 2) : toCsv(filtered);
+      const dest = await save({
+        defaultPath: suggested,
+        filters: [{ name: kind.toUpperCase(), extensions: [kind] }],
+      });
+      if (!dest) return;
+      await writeTextFile(dest, data);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
   }
 
-  async function handleExportCsv() {
+  function toCsv(rows: DownloadItem[]): string {
     const header = "id,title,url,format,quality,status,percent,speed,eta,path,error,createdAt\n";
-    const rows = filtered
+    const body = rows
       .map(
         (item) =>
           `"${(item.title ?? "").replace(/"/g, '""')}","${item.url.replace(/"/g, '""')}",${item.format},${item.quality},${item.status},${item.percent},"${(item.speed ?? "").replace(/"/g, '""')}","${(item.eta ?? "").replace(/"/g, '""')}","${(item.path ?? "").replace(/"/g, '""')}","${(item.error ?? "").replace(/"/g, '""')}",${item.createdAt}`
       )
       .join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `history-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return header + body;
   }
 
   if (items.length === 0) {
@@ -107,7 +129,15 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
+      {actionError && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-900 bg-red-950/40 p-2 text-xs text-red-200"
+        >
+          {actionError}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
         <span className="shrink-0 text-xs text-zinc-500">
           {t(locale, "historyView.itemsLabel", { n: filtered.length })}
         </span>
@@ -135,7 +165,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
         </select>
         <button
           type="button"
-          onClick={handleExportCsv}
+          onClick={() => void exportToFile("csv")}
           disabled={filtered.length === 0}
           title={t(locale, "historyView.exportCsv")}
           className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
@@ -144,7 +174,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
         </button>
         <button
           type="button"
-          onClick={handleExportJson}
+          onClick={() => void exportToFile("json")}
           disabled={filtered.length === 0}
           title={t(locale, "historyView.exportJson")}
           className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
@@ -161,7 +191,7 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
       </div>
       {filtered.length === 0 && (
         <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-center text-xs text-zinc-500">
-          No items match the current search / filter.
+          {t(locale, "historyView.noMatch")}
         </p>
       )}
       {filtered.map((item) => (
@@ -170,13 +200,13 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
             <span
               className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLES[item.status]}`}
             >
-              {item.status}
+              {t(locale, `mainView.status.${item.status}`)}
             </span>
             <span className="text-[11px] text-zinc-500">
               {item.format.toUpperCase()} · {item.quality}
             </span>
             <span className="ml-auto shrink-0 text-[11px] text-zinc-500">
-              {formatDate(item.createdAt)}
+              {formatDate(item.createdAt, locale)}
             </span>
           </div>
           <p className="mt-2 truncate text-xs text-zinc-200" title={item.url}>
@@ -225,10 +255,10 @@ export default function HistoryView({ items, onHistoryChange, onRetry }: History
             {item.path && item.status === "done" && (
               <button
                 type="button"
-                onClick={() => void handleDeleteFile(item.path!)}
+                onClick={() => void handleDeleteFile(item)}
                 className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 hover:border-red-500 hover:text-red-300"
               >
-                Delete file
+                {t(locale, "historyView.deleteFile")}
               </button>
             )}
             <button

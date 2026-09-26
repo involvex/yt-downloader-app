@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Download, History, Settings as SettingsIcon } from "lucide-react";
 import MainView from "./components/MainView";
 import HistoryView from "./components/HistoryView";
 import SettingsView from "./components/SettingsView";
@@ -9,10 +10,10 @@ import type { DownloadItem, Settings } from "./lib/types";
 
 type Tab = "main" | "history" | "settings";
 
-const TABS: { id: Tab; key: string }[] = [
-  { id: "main", key: "tab.download" },
-  { id: "history", key: "tab.history" },
-  { id: "settings", key: "tab.settings" },
+const TABS: { id: Tab; key: string; icon: typeof Download }[] = [
+  { id: "main", key: "tab.download", icon: Download },
+  { id: "history", key: "tab.history", icon: History },
+  { id: "settings", key: "tab.settings", icon: SettingsIcon },
 ];
 
 function AppInner() {
@@ -50,15 +51,16 @@ function AppInner() {
               key={tabItem.id}
               type="button"
               onClick={() => setTab(tabItem.id)}
-              className={`rounded-t-lg px-4 py-2 text-xs font-semibold transition-colors ${
+              className={`flex items-center gap-1.5 rounded-t-lg px-4 py-2 text-xs font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-zinc-400 ${
                 tab === tabItem.id
                   ? "bg-zinc-900 text-zinc-100"
                   : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
+              <tabItem.icon size={14} strokeWidth={2.5} aria-hidden />
               {t(locale, tabItem.key)}
               {tabItem.id === "history" && history.length > 0 && (
-                <span className="ml-1.5 rounded-full bg-zinc-700 px-1.5 py-0.5 text-[10px]">
+                <span className="ml-0.5 rounded-full bg-zinc-700/80 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
                   {history.length}
                 </span>
               )}
@@ -86,7 +88,12 @@ function AppInner() {
               />
             )}
             {tab === "history" && (
-              <HistoryView items={history} onHistoryChange={setHistory} onRetry={handleRetry} />
+              <HistoryView
+                items={history}
+                onHistoryChange={setHistory}
+                onRetry={handleRetry}
+                outputDir={settings.outputDir}
+              />
             )}
             {tab === "settings" && <SettingsView settings={settings} onSave={setSettings} />}
           </>

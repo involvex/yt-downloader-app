@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
+import { ClipboardPaste, Download, Eye, X } from "lucide-react";
 import { upsertHistoryItem } from "../lib/store";
 import { t, useLocale } from "../lib/i18n.ts";
 import {
@@ -53,6 +59,7 @@ interface ActiveDownload {
   status: "queued" | "downloading" | "done" | "error";
   donePath?: string;
   error?: string;
+  seq: number;
 }
 
 interface QueuedJob {
@@ -69,26 +76,46 @@ interface QueuedJob {
 }
 
 function MetaCard({ meta }: { meta: VideoMetadata }) {
+  const [imgOk, setImgOk] = useState(true);
+  const duration = meta.duration != null ? formatDuration(meta.duration) : null;
   return (
     <div className="flex gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
-      {meta.thumbnail != null && meta.thumbnail !== "" && (
-        <img
-          src={meta.thumbnail}
-          alt=""
-          referrerPolicy="no-referrer"
-          className="h-16 w-28 shrink-0 rounded-md object-cover"
-        />
+      {meta.thumbnail != null && meta.thumbnail !== "" && imgOk && (
+        <div className="relative h-16 w-28 shrink-0">
+          <img
+            src={meta.thumbnail}
+            alt=""
+            referrerPolicy="no-referrer"
+            onError={() => setImgOk(false)}
+            className="h-16 w-28 rounded-md object-cover"
+          />
+          {duration && (
+            <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 py-px font-mono text-[10px] font-semibold text-zinc-100">
+              {duration}
+            </span>
+          )}
+        </div>
       )}
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-zinc-100">{meta.title ?? "Untitled"}</p>
         <p className="mt-0.5 truncate text-[11px] text-zinc-400">
-          {[meta.uploader, meta.duration != null ? formatDuration(meta.duration) : null]
-            .filter(Boolean)
-            .join(" · ")}
+          {[meta.uploader, duration].filter(Boolean).join(" · ")}
         </p>
       </div>
     </div>
   );
+}
+
+async function notifyDownload(title: string, body: string) {
+  try {
+    // Skip when focused — the progress card already shows the outcome.
+    if (document.hasFocus()) return;
+    let granted = await isPermissionGranted();
+    if (!granted) granted = (await requestPermission()) === "granted";
+    if (granted) sendNotification({ title, body });
+  } catch {
+    // Notifications are best-effort; never break the download flow.
+  }
 }
 
 export default function MainView({ settings, initialUrl, onHistoryChange }: MainViewProps) {
@@ -113,6 +140,8 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   const jobsRef = useRef(new Map<string, DownloadItem>());
   const queueRef = useRef<QueuedJob[]>([]);
   const runningRef = useRef(0);
+  const seqRef = useRef(0);
+  const localeRef = useRef(locale);
   const lastPersistRef = useRef<Record<string, number>>({});
   const onHistoryChangeRef = useRef(onHistoryChange);
   const settingsRef = useRef(settings);
@@ -122,6 +151,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   useEffect(() => {
     onHistoryChangeRef.current = onHistoryChange;
     settingsRef.current = settings;
+    localeRef.current = locale;
   });
 
   // FEAT-006: clipboard auto-detect on mount + window focus (only when the
@@ -206,6 +236,8 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
             };
           });
           void persist(p.id, { status: "done", percent: 100, path: p.path }, true);
+          const l = localeRef.current;
+          void notifyDownload(t(l, "notify.doneTitle"), t(l, "notify.doneBody", { path: p.path }));
         }),
         await listen<ErrorEventPayload>("download-error", (e) => {
           const p = e.payload;
@@ -218,6 +250,10 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
           const cur = jobsRef.current.get(p.id);
           if (cur && cur.status !== "done") {
             void persist(p.id, { status: "error", error: p.message }, true);
+            if (!/cancelled/i.test(p.message)) {
+              const l = localeRef.current;
+              void notifyDownload(t(l, "notify.errorTitle"), p.message.slice(0, 200));
+            }
           }
         }),
       ];
@@ -335,6 +371,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     };
     jobsRef.current.set(id, base);
     onHistoryChangeRef.current(await upsertHistoryItem(base));
+    const queued = runningRef.current >= MAX_CONCURRENT;
+    seqRef.current += 1;
+    const seq = seqRef.current;
     setActive((prev) => ({
       ...prev,
       [id]: {
@@ -343,11 +382,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         format,
         quality,
         percent: 0,
-        raw:
-          runningRef.current < MAX_CONCURRENT
-            ? t(locale, "mainView.starting")
-            : t(locale, "mainView.queued"),
-        status: runningRef.current < MAX_CONCURRENT ? "downloading" : "queued",
+        raw: queued ? t(locale, "mainView.queued") : t(locale, "mainView.starting"),
+        status: queued ? "queued" : "downloading",
+        seq,
       },
     }));
     queueRef.current.push({
@@ -367,7 +404,34 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     pump();
   }
 
+  function dequeue(id: string) {
+    queueRef.current = queueRef.current.filter((j) => j.id !== id);
+  }
+
   async function cancelJob(id: string) {
+    const cur = jobsRef.current.get(id);
+    // Queued but not yet running: just dequeue locally, no backend call.
+    const activeStatus = cur?.status;
+    if (activeStatus === "queued") {
+      dequeue(id);
+      const cancelled: DownloadItem = {
+        ...(cur as DownloadItem),
+        status: "error",
+        error: t(locale, "mainView.cancelling"),
+      };
+      jobsRef.current.set(id, cancelled);
+      lastPersistRef.current[id] = cancelled.createdAt;
+      onHistoryChangeRef.current(await upsertHistoryItem(cancelled));
+      setActive((prev) => {
+        const curActive = prev[id];
+        if (!curActive) return prev;
+        return {
+          ...prev,
+          [id]: { ...curActive, status: "error", error: t(locale, "mainView.cancelling") },
+        };
+      });
+      return;
+    }
     // Optimistic UI — the backend error event confirms it.
     setActive((prev) => {
       const cur = prev[id];
@@ -390,6 +454,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   }
 
   function dismissJob(id: string) {
+    dequeue(id);
     setActive((prev) => {
       const next = { ...prev };
       delete next[id];
@@ -399,7 +464,11 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
   }
 
   async function fetchPreview() {
-    const trimmed = url.trim();
+    await fetchPreviewFor(url);
+  }
+
+  async function fetchPreviewFor(value: string) {
+    const trimmed = value.trim();
     if (!/^https?:\/\//i.test(trimmed)) {
       setUrlError(t(locale, "mainView.urlError.http"));
       return;
@@ -417,7 +486,27 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
     }
   }
 
-  const items = Object.values(active).sort((a, b) => (a.id < b.id ? 1 : -1));
+  // Auto-preview (debounced): after a valid URL lands via paste, drop, or
+  // clipboard fill, fetch metadata quietly. Manual Preview always wins;
+  // silent failures stay silent until the user asks explicitly.
+  useEffect(() => {
+    const trimmed = url.trim();
+    if (!/^https?:\/\//i.test(trimmed)) return;
+    if (meta != null || metaLoading) return;
+    const h = setTimeout(() => {
+      void (async () => {
+        try {
+          const m = await invoke<VideoMetadata>("fetch_metadata", { url: trimmed });
+          setMeta(m);
+        } catch {
+          // Stay silent — the manual Preview button surfaces the error.
+        }
+      })();
+    }, 800);
+    return () => clearTimeout(h);
+  }, [url, meta, metaLoading]);
+
+  const items = Object.values(active).sort((a, b) => a.seq - b.seq);
   const running = items.filter((i) => i.status === "downloading" || i.status === "queued").length;
 
   return (
@@ -475,8 +564,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                 // Clipboard access denied or unavailable.
               }
             }}
-            className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 hover:border-zinc-500"
           >
+            <ClipboardPaste size={14} strokeWidth={2.5} aria-hidden />
             {t(locale, "mainView.pasteButton")}
           </button>
         </div>
@@ -485,120 +575,130 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor="format" className="text-xs font-medium text-zinc-400">
-          {t(locale, "mainView.formatLabel")}
-        </label>
-        <select
-          id="format"
-          value={format}
-          onChange={(e) => setFormat(e.currentTarget.value as MediaFormat)}
-          title={t(locale, "mainView.formatTitle")}
-          className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
-        >
-          {FORMAT_OPTIONS.map((f) => (
-            <option key={f.value} value={f.value}>
-              {t(locale, `formatOptions.${f.value}`)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={quality}
-          onChange={(e) => setQuality(e.currentTarget.value as Quality)}
-          disabled={!isVideoFormat(format)}
-          title={t(locale, "mainView.qualityTitle")}
-          className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none disabled:opacity-40"
-        >
-          {QUALITY_OPTIONS.map((q) => (
-            <option key={q.value} value={q.value}>
-              {t(locale, `qualityOptions.${q.value}`)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={playlist}
-          onChange={(e) => setPlaylist(e.currentTarget.value as PlaylistMode)}
-          title={t(locale, "mainView.playlistTitle")}
-          className="ml-auto rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
-        >
-          {PLAYLIST_OPTIONS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {t(locale, `playlistOptions.${p.value}`)}
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="format" className="text-xs font-medium text-zinc-400">
+            {t(locale, "mainView.formatLabel")}
+          </label>
+          <select
+            id="format"
+            value={format}
+            onChange={(e) => setFormat(e.currentTarget.value as MediaFormat)}
+            title={t(locale, "mainView.formatTitle")}
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
+          >
+            {FORMAT_OPTIONS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {t(locale, `formatOptions.${f.value}`)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={quality}
+            onChange={(e) => setQuality(e.currentTarget.value as Quality)}
+            disabled={!isVideoFormat(format)}
+            title={t(locale, "mainView.qualityTitle")}
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none disabled:opacity-40"
+          >
+            {QUALITY_OPTIONS.map((q) => (
+              <option key={q.value} value={q.value}>
+                {t(locale, `qualityOptions.${q.value}`)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={playlist}
+            onChange={(e) => setPlaylist(e.currentTarget.value as PlaylistMode)}
+            title={t(locale, "mainView.playlistTitle")}
+            className="ml-auto rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none"
+          >
+            {PLAYLIST_OPTIONS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {t(locale, `playlistOptions.${p.value}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {isVideoFormat(format) && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="subs" className="text-xs font-medium text-zinc-400">
+              {t(locale, "mainView.subsLabel")}
+            </label>
+            <input
+              id="subs"
+              type="text"
+              value={subtitleLangs}
+              onChange={(e) => setSubtitleLangs(e.currentTarget.value)}
+              placeholder={t(locale, "mainView.subsPlaceholder")}
+              spellCheck={false}
+              className="w-44 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            />
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={embedSubs}
+                onChange={(e) => setEmbedSubs(e.currentTarget.checked)}
+                disabled={subtitleLangs.trim() === ""}
+                className="accent-zinc-100"
+              />
+              {t(locale, "mainView.embedSubs")}
+            </label>
+          </div>
+        )}
+
+        {isVideoFormat(format) && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="sb" className="text-xs font-medium text-zinc-400">
+              {t(locale, "mainView.sponsorblockLabel")}
+            </label>
+            <input
+              id="sb"
+              type="text"
+              value={sponsorblockRemove}
+              onChange={(e) => setSponsorblockRemove(e.currentTarget.value)}
+              placeholder={t(locale, "mainView.sponsorblockPlaceholder")}
+              spellCheck={false}
+              className="w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            />
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={splitChapters}
+                onChange={(e) => setSplitChapters(e.currentTarget.checked)}
+                className="accent-zinc-100"
+              />
+              {t(locale, "mainView.splitChapters")}
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={embedChapters}
+                onChange={(e) => setEmbedChapters(e.currentTarget.checked)}
+                className="accent-zinc-100"
+              />
+              {t(locale, "mainView.embedChapters")}
+            </label>
+          </div>
+        )}
+        {!isVideoFormat(format) && (
+          <p className="text-[11px] text-zinc-500">{t(locale, "mainView.audioNote")}</p>
+        )}
       </div>
 
-      {isVideoFormat(format) && (
-        <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="subs" className="text-xs font-medium text-zinc-400">
-            {t(locale, "mainView.subsLabel")}
-          </label>
-          <input
-            id="subs"
-            type="text"
-            value={subtitleLangs}
-            onChange={(e) => setSubtitleLangs(e.currentTarget.value)}
-            placeholder={t(locale, "mainView.subsPlaceholder")}
-            spellCheck={false}
-            className="w-44 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
-          />
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
-            <input
-              type="checkbox"
-              checked={embedSubs}
-              onChange={(e) => setEmbedSubs(e.currentTarget.checked)}
-              disabled={subtitleLangs.trim() === ""}
-              className="accent-zinc-100"
-            />
-            {t(locale, "mainView.embedSubs")}
-          </label>
-        </div>
+      {urlError && (
+        <p role="alert" className="text-xs text-red-400">
+          {urlError}
+        </p>
       )}
-
-      {isVideoFormat(format) && (
-        <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="sb" className="text-xs font-medium text-zinc-400">
-            {t(locale, "mainView.sponsorblockLabel")}
-          </label>
-          <input
-            id="sb"
-            type="text"
-            value={sponsorblockRemove}
-            onChange={(e) => setSponsorblockRemove(e.currentTarget.value)}
-            placeholder={t(locale, "mainView.sponsorblockPlaceholder")}
-            spellCheck={false}
-            className="w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
-          />
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
-            <input
-              type="checkbox"
-              checked={splitChapters}
-              onChange={(e) => setSplitChapters(e.currentTarget.checked)}
-              className="accent-zinc-100"
-            />
-            {t(locale, "mainView.splitChapters")}
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
-            <input
-              type="checkbox"
-              checked={embedChapters}
-              onChange={(e) => setEmbedChapters(e.currentTarget.checked)}
-              className="accent-zinc-100"
-            />
-            {t(locale, "mainView.embedChapters")}
-          </label>
-        </div>
-      )}
-
-      {urlError && <p className="text-xs text-red-400">{urlError}</p>}
       <div className="flex gap-2">
         <button
           type="button"
           onClick={() => void startDownload()}
           disabled={!url.trim()}
-          className="flex-1 rounded-lg bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
         >
+          <Download size={16} strokeWidth={2.5} aria-hidden />
           {running > 0
             ? `${t(locale, "mainView.queueButton", { n: running })}`
             : t(locale, "mainView.downloadButton")}
@@ -608,8 +708,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
           onClick={() => void fetchPreview()}
           disabled={!url.trim() || metaLoading}
           title={t(locale, "mainView.previewButton")}
-          className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-zinc-200 hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex shrink-0 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-zinc-200 hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
+          <Eye size={16} strokeWidth={2.5} aria-hidden />
           {metaLoading
             ? `${t(locale, "mainView.previewLoading")}`
             : `${t(locale, "mainView.previewButton")}`}
@@ -625,7 +726,7 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
       {meta != null && <MetaCard meta={meta} />}
 
       {items.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2" aria-live="polite">
           <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
             {t(locale, "mainView.queueLabel", { max: MAX_CONCURRENT })}
           </p>
@@ -680,8 +781,9 @@ export default function MainView({ settings, initialUrl, onHistoryChange }: Main
                     <button
                       type="button"
                       onClick={() => void cancelJob(job.id)}
-                      className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:border-red-500 hover:text-red-300"
+                      className="flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:border-red-500 hover:text-red-300"
                     >
+                      <X size={12} strokeWidth={2.5} aria-hidden />
                       {t(locale, "mainView.cancel")}
                     </button>
                   )}

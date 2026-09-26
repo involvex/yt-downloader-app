@@ -8,9 +8,11 @@
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2.7.3",
         "@tauri-apps/plugin-fs": "^2.5.2",
+        "@tauri-apps/plugin-notification": "^2.4.0",
         "@tauri-apps/plugin-opener": "^2",
         "@tauri-apps/plugin-shell": "^2.3.6",
         "@tauri-apps/plugin-store": "^2.4.4",
+        "lucide-react": "^1.48.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -184,6 +186,8 @@
     "@tauri-apps/plugin-dialog": ["@tauri-apps/plugin-dialog@2.7.3", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-CRgE+7TP4tvq9MjBU6f04NLTFIqVMLKHk3hAqlhil00ngK9ACTrXPH3oHpKMProxILodd3YjBoKbMwSI4IEcfA=="],
 
     "@tauri-apps/plugin-fs": ["@tauri-apps/plugin-fs@2.5.2", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-XXvMSnFiob+G1H+YHCDf+bzWVumseQuEIhzpbOJzevUfL4k0U+sTApZWJHpoLiamggnVPJm5dJ5sDsniRyWxlg=="],
+
+    "@tauri-apps/plugin-notification": ["@tauri-apps/plugin-notification@2.4.0", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-xlJXMcUoKOjNupzDue5wrEsa1wytf+l/2gCAPhafHyP683Y3N7J/8clUWLZ3vpnwkpT2C1zcLMMQFjjecIG2xg=="],
 
     "@tauri-apps/plugin-opener": ["@tauri-apps/plugin-opener@2.5.5", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-xvzGai5aQds8j8R8RsUK/lW6pGG50YgOYIPLzvkqmkwAj7dfySOD7sGtejRzvVdMmv1EQfKVEFh1MvmDp8QR0g=="],
 
@@ -414,6 +418,8 @@
     "locate-path": ["locate-path@6.0.0", "", { "dependencies": { "p-locate": "^5.0.0" } }, "sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw=="],
 
     "lru-cache": ["lru-cache@5.1.1", "", { "dependencies": { "yallist": "^3.0.2" } }, "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w=="],
+
+    "lucide-react": ["lucide-react@1.48.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-R0CIKY/fXiC6y9xRBADgsK+VW2p/pcTJOMhLZf1T+uG+vJUvyUR02nGOgmIIC7MPkiNK4Ox8QDnbqF8rJYWPZQ=="],
 
     "merge2": ["merge2@1.4.1", "", {}, "sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg=="],
 
