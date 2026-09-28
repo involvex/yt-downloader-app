@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { check } from "@tauri-apps/plugin-updater";
 import { saveSettings } from "../lib/store";
 import { LOCALES, t, useLocale } from "../lib/i18n.ts";
 import {
@@ -49,6 +50,11 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
   const [fresh, setFresh] = useState<{ latest: string; stale: boolean } | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updaterState, setUpdaterState] = useState<
+    "idle" | "checking" | "available" | "latest" | "error" | "installing" | "installed"
+  >("idle");
+  const [updaterVersion, setUpdaterVersion] = useState<string | null>(null);
+  const [updaterError, setUpdaterError] = useState<string | null>(null);
 
   // FEAT-005: show bundled sidecar versions so a stale yt-dlp is visible.
   useEffect(() => {
@@ -170,6 +176,35 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
     setLocale(localeDraft);
     onSave(next);
     setSaved(true);
+  }
+
+  async function handleCheckForUpdates() {
+    try {
+      setUpdaterState("checking");
+      const update = await check();
+      if (update) {
+        setUpdaterVersion(update.version);
+        setUpdaterState("available");
+      } else {
+        setUpdaterState("latest");
+      }
+    } catch (e) {
+      setUpdaterError(e instanceof Error ? e.message : String(e));
+      setUpdaterState("error");
+    }
+  }
+
+  async function handleInstallUpdate() {
+    try {
+      setUpdaterState("installing");
+      const update = await check();
+      if (update) {
+        await update.install();
+        setUpdaterState("installed");
+      }
+    } catch {
+      // install() triggers a relaunch; the error is non-fatal.
+    }
   }
 
   return (
@@ -393,6 +428,76 @@ export default function SettingsView({ settings, onSave }: SettingsViewProps) {
             ))}
           </select>
         </div>
+      </Section>
+
+      <Section title={t(locale, "settingsView.updater.title")}>
+        <button
+          type="button"
+          onClick={handleCheckForUpdates}
+          disabled={updaterState === "checking"}
+          className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-white disabled:opacity-50"
+        >
+          {updaterState === "checking"
+            ? t(locale, "settingsView.updater.checking")
+            : t(locale, "settingsView.updater.check")}
+        </button>
+        {updaterState === "available" && updaterVersion && (
+          <p
+            role="status"
+            className="rounded-lg border border-emerald-900 bg-emerald-950/30 p-2 text-xs text-emerald-200"
+          >
+            {t(locale, "settingsView.updater.ready", {
+              latest: updaterVersion,
+              version: versions?.ytdlp ?? "?",
+            })}
+          </p>
+        )}
+        {updaterState === "latest" && (
+          <p
+            role="status"
+            className="rounded-lg border border-zinc-700 bg-zinc-900/40 p-2 text-xs text-zinc-400"
+          >
+            {t(locale, "settingsView.updater.latest", {
+              version: versions?.ytdlp ?? "?",
+            })}
+          </p>
+        )}
+        {updaterState === "error" && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-900 bg-red-950/30 p-2 text-xs text-red-200"
+          >
+            {t(locale, "settingsView.updater.error", {
+              error: updaterError ?? "unknown",
+            })}
+          </p>
+        )}
+        {updaterState === "installing" && (
+          <p
+            role="status"
+            className="rounded-lg border border-blue-900 bg-blue-950/30 p-2 text-xs text-blue-200"
+          >
+            {t(locale, "settingsView.updater.installing")}
+          </p>
+        )}
+        {updaterState === "installed" && (
+          <p
+            role="status"
+            className="rounded-lg border border-emerald-900 bg-emerald-950/30 p-2 text-xs text-emerald-200"
+          >
+            {t(locale, "settingsView.updater.installed")}
+          </p>
+        )}
+        {(updaterState === "available" || updaterState === "installed") && (
+          <button
+            type="button"
+            onClick={handleInstallUpdate}
+            disabled={["checking", "error", "installing"].includes(updaterState)}
+            className="mt-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {t(locale, "settingsView.updater.installButton")}
+          </button>
+        )}
       </Section>
 
       <button

@@ -876,6 +876,10 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(
+            #[cfg(desktop)]
+            tauri_plugin_updater::Builder::new().build(),
+        )
         .invoke_handler(tauri::generate_handler![
             download_media,
             cancel_download,
